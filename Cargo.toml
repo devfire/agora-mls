@@ -5,14 +5,14 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
-chacha20poly1305 = "0.10.1"
 clap = { version = "4.5.48", features = ["derive"] }
 ed25519-dalek = { version = "2.2.0", features = ["signature"] }
 openmls = "0.7.0"
+openmls_basic_credential = "0.4.0"
+openmls_rust_crypto = "0.4.0"
 rpassword = "7.4.0"
-sha2 = "0.10.9"
 shellexpand = "3.1.1"
-ssh-key = { version = "0.6.7", features = ["ed25519"] }
+ssh-key = { version = "0.6.7", features = ["ed25519", "encryption"] }
 thiserror = "2.0.16"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
