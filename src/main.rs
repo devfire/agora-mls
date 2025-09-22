@@ -1,7 +1,8 @@
 use agora_mls::cli::ChatArgs;
 
 use clap::Parser;
-use tracing::{error, info};
+use tracing::{Level, error, info};
+use tracing_subscriber;
 
 fn main() {
     let args = ChatArgs::parse();
@@ -11,6 +12,20 @@ fn main() {
         error!("Error: {}", e);
         std::process::exit(1);
     }
+    // a bit of hack but rustyline cannot go to debug, it pumps out mad amount of info.
+    // sorry, rustyline :)
+    let filter_directives = format!("{}{}", args.log_level, ",rustyline=info");
 
-    info!("Starting chat with options: {:?}", args);
+    // Initialize tracing subscriber for logging (needed for validation errors)
+    tracing_subscriber::fmt()
+        .with_max_level(args.log_level.parse::<Level>().unwrap_or(Level::INFO))
+        // Include thread IDs only if log level is debug or trace
+        .with_thread_ids(args.log_level == "debug" || args.log_level == "trace")
+        .with_thread_names(args.log_level == "debug" || args.log_level == "trace")
+        .with_file(args.log_level == "debug" || args.log_level == "trace")
+        .with_line_number(args.log_level == "debug" || args.log_level == "trace")
+        .with_env_filter(filter_directives)
+        .init();
+
+    info!("Starting chat with options: {}", args);
 }

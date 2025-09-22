@@ -104,3 +104,14 @@ impl ChatArgs {
         Ok(())
     }
 }
+
+// Implement Display trait for pretty-printing
+impl std::fmt::Display for ChatArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "chat_id: {}, log_level: {}, multicast_address: {}, interface: {:?}, key_file: {:?}",
+            self.chat_id, self.log_level, self.multicast_address, self.interface, self.key_file
+        )
+    }
+}
