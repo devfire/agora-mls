@@ -1,8 +1,10 @@
 pub mod cli;
-pub mod identity;
+pub mod key_package;
+pub mod app;
+pub mod config;
 
 
 // Re-export commonly used items for easier access
 pub use crate::cli::ChatArgs;
 
-pub use crate::identity::OpenMlsKeyPackage;
+pub use crate::key_package::OpenMlsKeyPackage;

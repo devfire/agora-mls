@@ -1,11 +1,11 @@
-use openmls::{
-    ciphersuite,
-    prelude::{tls_codec::*, *},
-};
+use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::OpenMlsRustCrypto;
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{self, Path},
+};
 
 use anyhow::{Context, Result, anyhow};
 
@@ -70,7 +70,62 @@ impl OpenMlsKeyPackage {
         Ok((signing_key, verifying_key))
     }
 
-    // A helper to create and store credentials.
+    /// Creates and stores OpenMLS credentials from an OpenSSH ED25519 private key file.
+    ///
+    /// This function loads an SSH ED25519 private key from the specified path, extracts the
+    /// cryptographic material, and creates the necessary OpenMLS credential structures.
+    /// The resulting credential and signature key pair are essential for establishing
+    /// authenticated MLS (Messaging Layer Security) sessions.
+    ///
+    /// # Parameters
+    ///
+    /// * `ciphersuite` - The cryptographic ciphersuite to use for the MLS operations.
+    ///   This determines the signature algorithm and other cryptographic parameters.
+    /// * `path` - Path to the SSH ED25519 private key file in OpenSSH format.
+    ///   The key may be encrypted with a passphrase, which will be prompted for interactively.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing:
+    /// * `CredentialWithKey` - The MLS credential containing the public key for identity verification
+    /// * `SignatureKeyPair` - The signature key pair used for signing MLS messages
+    ///
+    /// # Behavior
+    ///
+    /// 1. **Key Loading**: Reads and parses the SSH private key file using the `ssh-key` crate
+    /// 2. **Decryption**: If the key is encrypted, prompts for passphrase and decrypts it securely
+    /// 3. **Key Validation**: Ensures the key is an ED25519 key (other key types are not supported)
+    /// 4. **Credential Creation**: Creates a `BasicCredential` from the public key bytes
+    /// 5. **Signature Setup**: Generates a new `SignatureKeyPair` using the ciphersuite's signature algorithm
+    /// 6. **Storage**: Stores the signature key in the provider's key store for OpenMLS access
+    ///
+    /// # Security Considerations
+    ///
+    /// * Passphrases are handled using the `zeroize` crate to ensure secure memory cleanup
+    /// * Private key material is never exposed in logs or error messages
+    /// * The function uses secure random number generation for key pair creation
+    /// * All sensitive operations follow cryptographic best practices
+    ///
+    /// # Error Handling
+    ///
+    /// The function will exit the process with code 1 if:
+    /// * The SSH key file cannot be read
+    /// * The key file is corrupted or invalid
+    /// * The key is not an ED25519 key
+    /// * The key decryption fails (wrong passphrase)
+    ///
+    /// Other OpenMLS-related errors are returned as `anyhow::Result` for caller handling.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut key_package = OpenMlsKeyPackage { provider: OpenMlsRustCrypto::default() };
+    /// let ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519;
+    /// let path = Path::new("/path/to/ssh/key");
+    ///
+    /// let (credential, signer) = key_package.create_openmls_credential_from_openssh_key(ciphersuite, path)?;
+    /// // Use credential and signer for MLS operations
+    /// ```
     fn create_openmls_credential_from_openssh_key(
         &mut self,
         ciphersuite: Ciphersuite,
@@ -78,10 +133,7 @@ impl OpenMlsKeyPackage {
                      // signature_algorithm: SignatureScheme,
                      // provider: &impl OpenMlsProvider,
     ) -> anyhow::Result<(CredentialWithKey, SignatureKeyPair)> {
-        // hardcoded to ensure compatibility with OpenSSH ED25519 keys
-        // let ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519;
-        // ... and the crypto provider to use.
-
+        debug!("Loading SSH Ed25519 key from {}", path.display());
         let (signing_key, verifying_key) = match Self::load_ssh_ed25519_key(path) {
             Ok((sk, vk)) => (sk, vk),
             Err(e) => {
@@ -121,25 +173,20 @@ impl OpenMlsKeyPackage {
         ))
     }
 
-    pub fn new(
-        &self,
-        ciphersuite: Ciphersuite,
-        // provider: &impl OpenMlsProvider,
-        // signer: &SignatureKeyPair,
-        // credential_with_key: CredentialWithKey,
-        path: &Path,
-    ) -> anyhow::Result<KeyPackageBundle> {
-        // let provider = &OpenMlsRustCrypto::default();
+    pub fn create_key_package_bundle(&mut self, path: &Path) -> anyhow::Result<KeyPackageBundle> {
+        let ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519;
 
-        // First, we get the credential with key and the signature keypair from the SSH ED25519 key
         let (credential_with_key, signer) =
-            Self::create_openmls_credential_from_openssh_key(ciphersuite, path)?;
+            self.create_openmls_credential_from_openssh_key(ciphersuite, path)?;
 
-        // Create the key package
-        match KeyPackage::builder().build(ciphersuite, &self.provider, &signer, credential_with_key)
-        {
-            Ok(kpb) => Ok(kpb),
-            Err(e) => Err(anyhow!("Error creating KeyPackageBundle: {}", e)),
+        KeyPackage::builder()
+            .build(ciphersuite, &self.provider, &signer, credential_with_key)
+            .map_err(|e| anyhow!("Error creating KeyPackageBundle: {}", e))
+    }
+
+    pub fn new() -> Self {
+        OpenMlsKeyPackage {
+            provider: OpenMlsRustCrypto::default(),
         }
     }
 }

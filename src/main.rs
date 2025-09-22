@@ -1,11 +1,11 @@
-use agora_mls::cli::ChatArgs;
+use agora_mls::{app::App, cli::ChatArgs, config::Config};
 
 use clap::Parser;
 use tracing::{Level, error, info};
 use tracing_subscriber;
 
-fn main() {
-    let args = ChatArgs::parse();
+fn main() -> anyhow::Result<()> {
+    let args: ChatArgs = ChatArgs::parse();
 
     // Validate arguments
     if let Err(e) = args.validate() {
@@ -28,4 +28,10 @@ fn main() {
         .init();
 
     info!("Starting chat with options: {}", args);
+
+    let config = Config::from_cli(args);
+    let mut app = App::new(config);
+
+    app.run()?;
+    Ok(())
 }

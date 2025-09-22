@@ -17,7 +17,7 @@ pub struct ChatArgs {
     /// Unique identifier for this agent
     #[arg(
         short = 'c',
-        // long = "chat-id",
+        long = "chat-id",
         help = "Unique identifier for this chat, automatically generated if not provided",
         default_value_t = Uuid::new_v4().to_string(),
         value_name = "ID"
@@ -27,7 +27,7 @@ pub struct ChatArgs {
     /// Log level filter
     #[arg(
         short = 'l',
-        // long = "log-level",
+        long = "log-level",
         help = "Set the log level",
         default_value = "info",
         value_parser = ["error", "warn", "info", "debug", "trace"]
@@ -37,7 +37,7 @@ pub struct ChatArgs {
     /// UDP multicast address for agent communication
     #[arg(
         short = 'm',
-        // long = "multicast-address",
+        long = "multicast-address",
         help = "UDP multicast address for agent communication",
         default_value = "239.255.255.250:8080",
         value_name = "ADDRESS:PORT"
@@ -47,7 +47,7 @@ pub struct ChatArgs {
     /// Network interface to bind to (optional)
     #[arg(
         short = 'i',
-        // long = "interface",
+        long = "interface",
         help = "Network interface to bind to (e.g., 'eth0', '192.168.1.100')",
         value_name = "INTERFACE"
     )]
@@ -56,11 +56,12 @@ pub struct ChatArgs {
     /// Private key file path (optional)
     #[arg(
         short = 'k',
-        help = "Private key file path (optional) in Ed25519 format",
+        help = "Private key file path (optional, defaults to ~/.ssh/id_ed25519) in Ed25519 format",
+        default_value = "~/.ssh/id_ed25519",
         value_parser=clap::value_parser!(PathBuf),
         value_name = "KEY_FILE_PATH"
     )]
-    pub key_file: Option<PathBuf>,
+    pub key_file: PathBuf,
 }
 
 impl ChatArgs {
@@ -92,14 +93,19 @@ impl ChatArgs {
         }
 
         // Validate key file if provided
-        if let Some(ref key_path) = self.key_file {
-            let expanded_path =
-                shellexpand::tilde(key_path.to_str().expect("Expected to find the key file"))
-                    .to_string();
-            let path = Path::new(&expanded_path);
-            if !path.exists() {
-                return Err(format!("Key file '{}' does not exist", path.display()));
-            }
+
+        let expanded_path = shellexpand::tilde(
+            self.key_file
+                .to_str()
+                .expect("Expected to find the key file"),
+        )
+        .to_string();
+        let path = Path::new(&expanded_path);
+        if !path.exists() {
+            return Err(format!("Key file '{}' does not exist", path.display()));
+        }
+        if !path.is_file() {
+            return Err(format!("Key file '{}' is not a valid file", path.display()));
         }
         Ok(())
     }
