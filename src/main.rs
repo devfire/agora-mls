@@ -7,13 +7,7 @@ use tracing_subscriber;
 fn main() -> anyhow::Result<()> {
     let args: ChatArgs = ChatArgs::parse();
 
-    // Validate arguments
-    if let Err(e) = args.validate() {
-        error!("Error: {}", e);
-        std::process::exit(1);
-    }
-    // a bit of hack but rustyline cannot go to debug, it pumps out mad amount of info.
-    // sorry, rustyline :)
+    // Set up logging with the specified log level and filter out noisy logs from rustyline
     let filter_directives = format!("{}{}", args.log_level, ",rustyline=info");
 
     // Initialize tracing subscriber for logging (needed for validation errors)
@@ -26,6 +20,14 @@ fn main() -> anyhow::Result<()> {
         .with_line_number(args.log_level == "debug" || args.log_level == "trace")
         .with_env_filter(filter_directives)
         .init();
+
+    // Validate arguments
+    if let Err(e) = args.validate() {
+        error!("Error: {}", e);
+        std::process::exit(1);
+    }
+    // a bit of hack but rustyline cannot go to debug, it pumps out mad amount of info.
+    // sorry, rustyline :)
 
     info!("Starting chat with options: {}", args);
 
