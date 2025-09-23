@@ -18,7 +18,7 @@ pub struct ChatArgs {
     #[arg(
         short = 'c',
         long = "chat-id",
-        help = "Unique identifier for this chat, automatically generated if not provided",
+        help = "Unique identifier for this chat, random UUID will be automatically generated if not provided",
         default_value_t = Uuid::new_v4().to_string(),
         value_name = "ID"
     )]
@@ -101,9 +101,11 @@ impl ChatArgs {
         )
         .to_string();
         let path = Path::new(&expanded_path);
+
         if !path.exists() {
             return Err(format!("Key file '{}' does not exist", path.display()));
         }
+
         if !path.is_file() {
             return Err(format!("Key file '{}' is not a valid file", path.display()));
         }

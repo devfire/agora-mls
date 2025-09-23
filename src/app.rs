@@ -17,11 +17,11 @@ impl App {
         // First, we load the key package
         debug!("Using configuration: {:?}", self.config);
 
+        // Let me establish my identity first
+        let identity =
+            crate::identity::MyIdentity::new(&self.config.key_file, &self.config.chat_id)?;
+
         let mut mls_key_package = OpenMlsKeyPackage::new();
-
-        let my_bundle = mls_key_package.create_key_package_bundle(&self.config.key_file)?;
-
-        debug!("Key package bundle created: {:?}", my_bundle);
 
         Ok(())
     }
