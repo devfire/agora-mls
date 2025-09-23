@@ -10,6 +10,7 @@ ed25519-dalek = { version = "2.2.0", features = ["signature"] }
 openmls = "0.7.0"
 openmls_basic_credential = "0.4.0"
 openmls_rust_crypto = "0.4.0"
+prost = "0.14.1"
 rpassword = "7.4.0"
 shellexpand = "3.1.1"
 ssh-key = { version = "0.6.7", features = ["ed25519", "encryption"] }
@@ -19,3 +20,7 @@ tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 uuid = { version = "1.18.1", features = ["v4"] }
 x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
 zeroize = "1.8.1"
+
+# Dependencies ONLY for the build.rs script
+[build-dependencies]
+prost-build = "0.14.1"

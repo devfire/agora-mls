@@ -1,8 +1,8 @@
-use crate::{OpenMlsKeyPackage, config::Config, identity::MyIdentity, key_package};
+use crate::{OpenMlsKeyPackage, config::Config, identity::MyIdentity};
 use anyhow::Result;
 
 use openmls::group::{MlsGroup, MlsGroupCreateConfig};
-use tracing::{debug, error, info};
+use tracing::debug;
 
 pub struct App {
     config: Config,
