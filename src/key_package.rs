@@ -2,32 +2,20 @@ use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::OpenMlsRustCrypto;
 
-use std::{
-    fs,
-    path::{self, Path},
-};
-
-use anyhow::{Context, Result, anyhow};
-
-use ed25519_dalek::{SigningKey, VerifyingKey};
-
-use ssh_key::PrivateKey;
-use tracing::{debug, error};
-
-use zeroize::Zeroizing;
+use anyhow::{Context, Result};
 
 pub struct OpenMlsKeyPackage {
     // client_identity: Vec<u8>, // Public key loaded from SSH ED25519 format
 
     // ... and the crypto provider to use.
-    provider: OpenMlsRustCrypto,
-    credential_type: CredentialType,
+    pub provider: OpenMlsRustCrypto,
+    ciphersuite: Ciphersuite,
     signature_algorithm: SignatureScheme,
 }
 
 impl OpenMlsKeyPackage {
     // A helper to create and store credentials.
-    fn generate_credential_with_key(
+    pub fn generate_credential_with_key(
         &mut self,
         identity: Vec<u8>,
     ) -> (CredentialWithKey, SignatureKeyPair) {
@@ -51,24 +39,28 @@ impl OpenMlsKeyPackage {
     }
 
     // A helper to create key package bundles.
-    fn generate_key_package(
-        ciphersuite: Ciphersuite,
-        provider: &impl OpenMlsProvider,
+    pub fn generate_key_package(
+        &mut self,
+        credential_with_key: &CredentialWithKey,
         signer: &SignatureKeyPair,
-        credential_with_key: CredentialWithKey,
     ) -> Result<KeyPackageBundle> {
         // Create the key package
         KeyPackage::builder()
-            .build(ciphersuite, provider, signer, credential_with_key)
+            .build(
+                self.ciphersuite,
+                &self.provider,
+                signer,
+                credential_with_key.clone(),
+            )
             .context("Error creating key package bundle.")
     }
 
     pub fn new() -> Self {
+        let ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519;
         OpenMlsKeyPackage {
             provider: OpenMlsRustCrypto::default(),
-            credential_type: CredentialType::Basic,
-            signature_algorithm: Ciphersuite::MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519
-                .signature_algorithm(),
+            ciphersuite,
+            signature_algorithm: ciphersuite.signature_algorithm(),
         }
     }
 }
