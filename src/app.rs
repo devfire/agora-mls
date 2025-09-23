@@ -39,8 +39,7 @@ impl App {
             &signature_keypair,
             &MlsGroupCreateConfig::default(),
             credential_with_key,
-        )
-        .expect("An unexpected error occurred.");
+        )?;
         Ok(())
     }
 }

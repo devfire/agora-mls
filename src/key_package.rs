@@ -14,7 +14,22 @@ pub struct OpenMlsKeyPackage {
 }
 
 impl OpenMlsKeyPackage {
-    // A helper to create and store credentials.
+    /// Generates a credential with an associated signature key pair.
+    ///
+    /// Creates a BasicCredential from the provided identity bytes, generates a new
+    /// SignatureKeyPair using the configured signature algorithm, and stores the keys
+    /// in the crypto provider's key store for OpenMLS access.
+    ///
+    /// # Arguments
+    /// * `identity` - Raw bytes representing the identity for the credential
+    ///
+    /// # Returns
+    /// A tuple containing:
+    /// * `CredentialWithKey` - The credential with embedded signature key
+    /// * `SignatureKeyPair` - The full key pair for signing operations
+    ///
+    /// # Panics
+    /// Panics if signature key generation or key store storage fails.
     pub fn generate_credential_with_key(
         &mut self,
         identity: Vec<u8>,
