@@ -3,6 +3,8 @@ pub mod cli;
 pub mod config;
 pub mod identity;
 pub mod key_package;
+pub mod network;
+pub mod processor;
 
 // Re-export commonly used items for easier access
 pub use crate::cli::ChatArgs;
@@ -10,6 +12,6 @@ pub use crate::cli::ChatArgs;
 pub use crate::key_package::OpenMlsKeyPackage;
 
 // Include the generated protobuf code
-pub mod agora_chat {
-    include!(concat!(env!("OUT_DIR"), "/agora_chat.rs"));
-}
+// The build script outputs to src/ directory so rust-analyzer can find it
+#[path = "agora_chat.rs"]
+pub mod agora_chat;

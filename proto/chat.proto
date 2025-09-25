@@ -4,7 +4,7 @@ syntax = "proto3";
 package agora_chat;
 
 // Main envelope for all messages transmitted over UDP multicast
-message ChatEnvelope {
+message ChatPacket {
   string message_id = 1;
   uint64 timestamp = 2;
   string sender_id = 3;
@@ -25,63 +25,7 @@ message ChatEnvelope {
 
 // Application-level chat messages (encrypted by MLS)
 message ApplicationMessage {
-  oneof content {
-    TextMessage text_message = 1;
-    MediaMessage media_message = 2;
-    SystemMessage system_message = 3;
-    TypingIndicator typing_indicator = 4;
-    MessageReaction message_reaction = 5;
-    MessageEdit message_edit = 6;
-    MessageDelete message_delete = 7;
-  }
-}
-
-message TextMessage {
   string content = 1;
-  optional string reply_to_message_id = 2;
-  repeated UserMention mentions = 3;
-}
-
-message MediaMessage {
-  MediaType media_type = 1;
-  bytes content = 2;
-  string filename = 3;
-  uint64 file_size = 4;
-  optional string mime_type = 5;
-  optional string caption = 6;
-}
-
-message SystemMessage {
-  SystemMessageType message_type = 1;
-  string content = 2;
-  repeated string affected_users = 3;
-}
-
-message TypingIndicator {
-  bool is_typing = 1;
-}
-
-message MessageReaction {
-  string message_id = 1;
-  string emoji = 2;
-  bool add_reaction = 3; // true to add, false to remove
-}
-
-message MessageEdit {
-  string original_message_id = 1;
-  string new_content = 2;
-  uint64 edit_timestamp = 3;
-}
-
-message MessageDelete {
-  string message_id = 1;
-  bool for_everyone = 2; // true if deleted for all users, false if only for sender
-}
-
-message UserMention {
-  string user_id = 1;
-  uint32 start_index = 2;
-  uint32 length = 3;
 }
 
 // MLS protocol messages

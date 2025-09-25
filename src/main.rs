@@ -4,8 +4,8 @@ use clap::Parser;
 use tracing::{Level, error, info};
 use tracing_subscriber;
 
-
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let args: ChatArgs = ChatArgs::parse();
 
     // Set up logging with the specified log level and filter out noisy logs from rustyline
@@ -35,6 +35,6 @@ fn main() -> anyhow::Result<()> {
     let config = Config::from_cli(args);
     let mut app = App::new(config);
 
-    app.run()?;
+    app.run().await?;
     Ok(())
 }
