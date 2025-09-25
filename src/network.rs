@@ -16,15 +16,78 @@ pub struct NetworkConfig {
     pub buffer_size: usize,
 }
 
-impl Default for NetworkConfig {
-    fn default() -> Self {
+/// Builder for creating NetworkConfig instances
+#[derive(Debug)]
+pub struct NetworkConfigBuilder {
+    multicast_address: Option<SocketAddr>,
+    interface: Option<String>,
+    buffer_size: Option<usize>,
+}
+
+impl NetworkConfigBuilder {
+    /// Create a new NetworkConfigBuilder with no defaults set
+    pub fn builder() -> Self {
         Self {
-            multicast_address: "239.255.255.250:8080".parse().unwrap(), // unwrap ok because this will never fail
+            multicast_address: None,
             interface: None,
-            buffer_size: 65536, // 64KB buffer
+            buffer_size: None,
         }
     }
+
+    /// Set the multicast address (required)
+    pub fn multicast_address(mut self, address: SocketAddr) -> Self {
+        self.multicast_address = Some(address);
+        self
+    }
+
+    /// Set the network interface (optional)
+    pub fn interface(mut self, interface: impl Into<String>) -> Self {
+        self.interface = Some(interface.into());
+        self
+    }
+
+    /// Set the buffer size
+    pub fn buffer_size(mut self, size: usize) -> Self {
+        self.buffer_size = Some(size);
+        self
+    }
+
+    /// Build the NetworkConfig, validating required fields
+    pub fn build(self) -> Result<NetworkConfig> {
+        let multicast_address = self.multicast_address
+            .ok_or_else(|| anyhow::anyhow!("multicast_address is required"))?;
+
+        // Validate that the address is a multicast address
+        if !multicast_address.ip().is_multicast() {
+            bail!(
+                "Address {} is not a valid multicast address",
+                multicast_address.ip()
+            );
+        }
+
+        Ok(NetworkConfig {
+            multicast_address,
+            interface: self.interface,
+            buffer_size: self.buffer_size.unwrap_or(65536), // Default to 64KB
+        })
+    }
 }
+
+impl Default for NetworkConfigBuilder {
+    fn default() -> Self {
+        Self::builder()
+    }
+}
+
+// impl Default for NetworkConfig {
+//     fn default() -> Self {
+//         Self {
+//             multicast_address: "239.255.255.250:8080".parse().unwrap(), // unwrap ok because this will never fail
+//             interface: None,
+//             buffer_size: 65536, // 64KB buffer
+//         }
+//     }
+// }
 
 /// Manages UDP multicast networking for communicating with other chat clients
 pub struct NetworkManager {

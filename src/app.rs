@@ -1,6 +1,11 @@
 use std::sync::Arc;
 
-use crate::{config::Config, identity::MyIdentity, network::{NetworkConfig, NetworkManager}, OpenMlsKeyPackage};
+use crate::{
+    OpenMlsKeyPackage,
+    config::Config,
+    identity::MyIdentity,
+    network::{NetworkConfig, NetworkConfigBuilder, NetworkManager},
+};
 use anyhow::Result;
 
 use openmls::group::{MlsGroup, MlsGroupCreateConfig};
@@ -44,17 +49,20 @@ impl App {
         // )?;
 
         // Create network configuration
-        let network_config = NetworkConfig {
-            multicast_address: self.config.multicast_address.clone(),
-            interface: self.config.interface.clone(),
-            buffer_size: 65536, // 64KB buffer for better performance
-        };
+        // let network_config = NetworkConfig {
+        //     multicast_address: self.config.multicast_address.clone(),
+        //     interface: self.config.interface.clone(),
+        //     buffer_size: 65536, // 64KB buffer for better performance
+        // };
 
+        let network_config = NetworkConfigBuilder::builder()
+            .multicast_address(self.config.multicast_address)
+            .interface(self.config.interface.clone().unwrap_or_default())
+            .buffer_size(65536) // 64KB buffer for better performance
+            .build()?;
         // Initialize network manager
         let network_manager = Arc::new(NetworkManager::new(network_config).await?);
 
-        
-        
         Ok(())
     }
 }
