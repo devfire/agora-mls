@@ -52,7 +52,13 @@ impl Processor {
                                     continue;
                                 }
                                 Err(e) => {
-                                    error!("Error processing command: {e}");
+                                    // Check if this is a help request
+                                    if e.kind() == clap::error::ErrorKind::DisplayHelp {
+                                        // Print help text
+                                        Command::show_custom_help();
+                                    } else {
+                                        error!("Error processing command: {e}");
+                                    }
                                     continue;
                                 }
                             }

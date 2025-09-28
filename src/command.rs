@@ -1,10 +1,9 @@
 /// Possible input commands from the user.
 ///
-use clap::{Parser, Subcommand};
+use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "")]
-#[command(no_binary_name = true)]
+#[command(name = "agora")]
 #[command(disable_help_flag = true)]
 pub enum Command {
     /// Join a channel
@@ -46,12 +45,48 @@ pub enum Command {
 impl Command {
     /// Parse a command from a string input
     pub fn parse_command(input: &str) -> Result<Self, clap::Error> {
-        let args = shell_words::split(&input[1..])
-            .map_err(|e| {
-                tracing::error!("Error parsing command: {}", e);
-            })
-            .unwrap_or_default();
-        Ok(Command::try_parse_from(args)?)
-        // Some(command_input.command)
+        let args = shell_words::split(&input[1..]).map_err(|e| {
+            clap::Error::raw(
+                clap::error::ErrorKind::InvalidValue,
+                format!("Shell parsing error: {}", e),
+            )
+        })?;
+
+        // Handle the automatic help command
+        if args.is_empty()
+            || args
+                .iter()
+                .any(|arg| arg == "help" || arg == "--help" || arg == "-h")
+        {
+            // Return an error that indicates help was requested
+            // This will be caught by the caller to display help
+            return Err(clap::Error::raw(
+                clap::error::ErrorKind::DisplayHelp,
+                "Help requested",
+            ));
+        }
+
+        Command::try_parse_from(args)
+    }
+
+    pub fn show_custom_help() {
+        println!("╭─ Chat Commands ─────────────────────────────────────────╮");
+        println!("│                                                         │");
+        println!("│  /join <channel> [-p password]  Join a channel          │");
+        println!("│  /leave [channel]               Leave channel           │");
+        println!("│  /msg <user> <message>          Send private message    │");
+        println!("│  /nick <nickname>               Change your nickname    │");
+        println!("│  /users                         List users in channel   │");
+        println!("│  /channels                      List available channels │");
+        println!("│  /help                          Show this help          │");
+        println!("│  /quit, /q                      Exit the chat           │");
+        println!("│                                                         │");
+        println!("│  Examples:                                              │");
+        println!("│    /join #general                                       │");
+        println!("│    /join #private -p secret123                          │");
+        println!("│    /msg alice Hey there!                                │");
+        println!("│    /nick CoolUser                                       │");
+        println!("│                                                         │");
+        println!("╰─────────────────────────────────────────────────────────╯");
     }
 }
