@@ -1,17 +1,17 @@
 /// Possible input commands from the user.
-/// 
-
+///
 use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "")]
 #[command(no_binary_name = true)]
-struct Cli {
+#[command(disable_help_flag = true)] 
+struct CommandInput {
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand, Debug)]
-enum Commands {
+pub enum Commands {
     /// Join a channel
     Join {
         /// Channel name to join
@@ -42,9 +42,21 @@ enum Commands {
     Users,
     /// List available channels
     Channels,
-    /// Show help
-    Help,
+
     /// Quit the application
     #[command(alias = "q")]
     Quit,
+}
+
+impl Commands {
+    /// Parse a command from a string input
+    pub fn parse_command(input: &str) -> Result<Self, clap::Error> {
+        let args = shell_words::split(&input[1..])
+            .map_err(|e| {
+                tracing::error!("Error parsing command: {}", e);
+            })
+            .unwrap_or_default();
+        Ok(CommandInput::try_parse_from(args)?.command)
+        // Some(command_input.command)
+    }
 }

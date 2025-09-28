@@ -3,7 +3,7 @@ use std::sync::Arc;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use tracing::{debug, error};
 
-use crate::{agora_chat::ApplicationMessage, network};
+use crate::{agora_chat::ApplicationMessage, command::Commands, network};
 
 pub struct Processor {
     pub network_manager: Arc<network::NetworkManager>,
@@ -43,6 +43,20 @@ impl Processor {
                             error!("Could not even add to history {e}")
                         }
 
+                        // check to see if input starts with `/` which indicates a command
+                        if line.starts_with('/') {
+                            // handle commands here
+                            match Commands::parse_command(&line) {
+                                Ok(c) => {
+                                    debug!("Command entered: {:?}", c);
+                                    continue;
+                                }
+                                Err(e) => {
+                                    error!("Error processing command: {e}");
+                                    continue;
+                                }
+                            }
+                        }
                         debug!("Stdin input read line: {}", line);
 
                         // encrypt the packet here
