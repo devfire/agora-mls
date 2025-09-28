@@ -3,7 +3,9 @@ use std::sync::Arc;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use tracing::{debug, error};
 
-use crate::{agora_chat::ApplicationMessage, command::Command, network};
+use crate::{
+    agora_chat::ApplicationMessage, command::Command, handle_command::handle_command, network,
+};
 
 pub struct Processor {
     pub network_manager: Arc<network::NetworkManager>,
@@ -49,6 +51,8 @@ impl Processor {
                             match Command::parse_command(&line) {
                                 Ok(c) => {
                                     debug!("Command entered: {:?}", c);
+                                    // Handle the command supplied
+                                    handle_command(c);
                                     continue;
                                 }
                                 Err(e) => {
@@ -57,7 +61,7 @@ impl Processor {
                                         // Print help text
                                         Command::show_custom_help();
                                     } else {
-                                        error!("Error processing command: {e}");
+                                        error!("Command processing failed with {e}");
                                     }
                                     continue;
                                 }

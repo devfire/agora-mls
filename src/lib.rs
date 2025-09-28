@@ -6,6 +6,7 @@ pub mod key_package;
 pub mod network;
 pub mod processor;
 pub mod command;
+pub mod handle_command;
 
 // Re-export commonly used items for easier access
 pub use crate::cli::ChatArgs;

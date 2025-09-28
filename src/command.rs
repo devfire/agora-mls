@@ -1,17 +1,24 @@
 /// Possible input commands from the user.
 ///
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "agora")]
 #[command(disable_help_flag = true)]
+#[command(name = "")]
+#[command(no_binary_name = true)]
+pub struct CommandWrapper {
+    #[command(subcommand)]
+    pub command: Command,
+}
+#[derive(Subcommand, Debug)]
 pub enum Command {
     /// Join a channel
     Join {
         /// Channel name to join
+        #[arg(help = "Name of the channel to join")]
         channel: String,
         /// Optional password
-        #[arg(short, long)]
+        #[arg(short, long, help = "Channel password (if required)")]
         password: Option<String>,
     },
     /// Leave current or specified channel
@@ -66,7 +73,7 @@ impl Command {
             ));
         }
 
-        Command::try_parse_from(args)
+        CommandWrapper::try_parse_from(args).map(|wrapper| wrapper.command)
     }
 
     pub fn show_custom_help() {
