@@ -4,11 +4,15 @@ use std::sync::Arc;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use tracing::{debug, error};
 
-use crate::{agora_chat::ApplicationMessage, command::Command, network, state_actor::StateActor};
+use crate::{
+    agora_chat::ApplicationMessage,
+    command::Command,
+    network,
+    state_actor::{Request, StateActor},
+};
 
 pub struct Processor {
     pub network_manager: Arc<network::NetworkManager>,
-    
 }
 
 impl Processor {
@@ -56,7 +60,9 @@ impl Processor {
                                 Ok(c) => {
                                     debug!("Command entered: {:?}", c);
                                     // Send the command to the actor
-                                    Self::handle_command(state_actor.clone(), &c).await;
+                                    Self::handle_command(state_actor.clone(), &c)
+                                        .await
+                                        .expect("Failed to handle command");
                                     continue;
                                 }
                                 Err(e) => {
@@ -106,16 +112,15 @@ impl Processor {
 
                 // Let's tell the state actor to join the channel
                 state_actor
-                    .tell(crate::state_actor::Request::JoinChannel(
-                        channel.clone(),
-                        password.clone(),
-                    ))
+                    .tell(Request::JoinChannel(channel.clone(), password.clone()))
                     .await?;
             }
             Command::Leave { channel } => todo!(),
             Command::Msg { user, message } => todo!(),
             Command::Nick { nickname } => todo!(),
-            Command::Users => todo!(),
+            Command::Users => {
+                // request the users from the state actor
+            }
             Command::Channels => todo!(),
             Command::Quit => todo!(),
         }

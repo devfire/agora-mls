@@ -18,7 +18,7 @@ pub enum Command {
         #[arg(help = "Name of the channel to join")]
         channel: String,
         /// Optional password
-        #[arg(short, long, help = "Channel password (if required)")]
+        #[arg(help = "Channel password (if required)")]
         password: Option<String>,
     },
     /// Leave current or specified channel
@@ -79,7 +79,7 @@ impl Command {
     pub fn show_custom_help() {
         println!("╭─ Chat Commands ─────────────────────────────────────────╮");
         println!("│                                                         │");
-        println!("│  /join <channel> [-p password]  Join a channel          │");
+        println!("│  /join <channel> [password]     Join a channel          │");
         println!("│  /leave [channel]               Leave channel           │");
         println!("│  /msg <user> <message>          Send private message    │");
         println!("│  /nick <nickname>               Change your nickname    │");
@@ -90,7 +90,7 @@ impl Command {
         println!("│                                                         │");
         println!("│  Examples:                                              │");
         println!("│    /join #general                                       │");
-        println!("│    /join #private -p secret123                          │");
+        println!("│    /join #private secret123                             │");
         println!("│    /msg alice Hey there!                                │");
         println!("│    /nick CoolUser                                       │");
         println!("│                                                         │");
