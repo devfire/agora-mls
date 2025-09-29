@@ -1,12 +1,14 @@
-use std::sync::Arc;
-
 use crate::{
     OpenMlsKeyPackage,
     config::Config,
     identity::MyIdentity,
     network::{NetworkConfig, NetworkConfigBuilder, NetworkManager},
+    processor::Processor,
+    state_actor::{self, StateActor},
 };
 use anyhow::Result;
+use kameo::prelude::*;
+use std::sync::Arc;
 
 use openmls::group::{MlsGroup, MlsGroupCreateConfig};
 use tracing::debug;
@@ -59,9 +61,12 @@ impl App {
         // Initialize network manager
         let network_manager = Arc::new(NetworkManager::new(network_config).await?);
 
-        let processor = crate::processor::Processor::new(Arc::clone(&network_manager));
+        // Spawn the state actor
+        let state_actor = StateActor::spawn(StateActor::default());
 
-        let stdin_handle = processor.spawn_stdin_input_task(&self.config.chat_id);
+        let processor = Processor::new(Arc::clone(&network_manager));
+
+        let stdin_handle = processor.spawn_stdin_input_task(state_actor, &self.config.chat_id);
 
         // Wait for tasks to complete (they run indefinitely)
         // The stdin_input_handle is the only one designed to finish, triggering a shutdown.

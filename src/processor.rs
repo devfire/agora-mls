@@ -1,14 +1,14 @@
+use kameo::prelude::*;
 use std::sync::Arc;
 
 use rustyline::{DefaultEditor, error::ReadlineError};
 use tracing::{debug, error};
 
-use crate::{
-    agora_chat::ApplicationMessage, command::Command, handle_command::handle_command, network,
-};
+use crate::{agora_chat::ApplicationMessage, command::Command, network, state_actor::StateActor};
 
 pub struct Processor {
     pub network_manager: Arc<network::NetworkManager>,
+    
 }
 
 impl Processor {
@@ -17,7 +17,11 @@ impl Processor {
     }
 
     /// Spawn a task to handle user input from stdin.
-    pub fn spawn_stdin_input_task(&self, chat_id: &str) -> tokio::task::JoinHandle<()> {
+    pub fn spawn_stdin_input_task(
+        &self,
+        state_actor: ActorRef<StateActor>,
+        chat_id: &str,
+    ) -> tokio::task::JoinHandle<()> {
         let network_manager = Arc::clone(&self.network_manager);
 
         let chat_id = chat_id.to_string();
@@ -51,8 +55,8 @@ impl Processor {
                             match Command::parse_command(&line) {
                                 Ok(c) => {
                                     debug!("Command entered: {:?}", c);
-                                    // Handle the command supplied
-                                    handle_command(c);
+                                    // Send the command to the actor
+                                    Self::handle_command(state_actor.clone(), &c).await;
                                     continue;
                                 }
                                 Err(e) => {
@@ -87,5 +91,34 @@ impl Processor {
                 }
             }
         })
+    }
+
+    async fn handle_command(
+        state_actor: ActorRef<StateActor>,
+        command: &Command,
+    ) -> anyhow::Result<()> {
+        match command {
+            Command::Join { channel, password } => {
+                debug!(
+                    "Joining channel: {}, with password: {:?}",
+                    channel, password
+                );
+
+                // Let's tell the state actor to join the channel
+                state_actor
+                    .tell(crate::state_actor::Request::JoinChannel(
+                        channel.clone(),
+                        password.clone(),
+                    ))
+                    .await?;
+            }
+            Command::Leave { channel } => todo!(),
+            Command::Msg { user, message } => todo!(),
+            Command::Nick { nickname } => todo!(),
+            Command::Users => todo!(),
+            Command::Channels => todo!(),
+            Command::Quit => todo!(),
+        }
+        Ok(())
     }
 }
