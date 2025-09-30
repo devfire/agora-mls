@@ -60,11 +60,13 @@ impl App {
         // Initialize network manager
         let network_manager = Arc::new(NetworkManager::new(network_config).await?);
 
-        let (command_sender, command_receiver) = tokio::sync::mpsc::channel::<Command>(50);
+        let (command_sender, command_receiver) = tokio::sync::mpsc::unbounded_channel::<Command>();
 
         let processor = Processor::new(identity, Arc::clone(&network_manager));
 
-        let stdin_handle = processor.spawn_stdin_input_task(command_sender.clone());
+        // Note the distinct lack of .await here - we want to spawn these tasks and let them run concurrently
+        // rather than waiting for each to complete before starting the next.
+        let stdin_handle = processor.spawn_stdin_input_task(command_sender);
         let command_handle = processor.spawn_command_handler_task(command_receiver);
 
         // Wait for tasks to complete (they run indefinitely)
