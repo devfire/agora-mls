@@ -1,14 +1,15 @@
-use std::sync::Arc;
-
 use crate::{
-    OpenMlsKeyPackage,
+    command::Command,
     config::Config,
     identity::MyIdentity,
-    network::{NetworkConfig, NetworkConfigBuilder, NetworkManager},
+    network::{NetworkConfigBuilder, NetworkManager},
+    processor::Processor,
 };
 use anyhow::Result;
 
-use openmls::group::{MlsGroup, MlsGroupCreateConfig};
+use std::sync::Arc;
+
+// use openmls::group::{MlsGroup, MlsGroupCreateConfig};
 use tracing::debug;
 
 pub struct App {
@@ -27,13 +28,13 @@ impl App {
         // // Let me establish my identity first
         let identity = MyIdentity::new(&self.config.key_file, &self.config.chat_id)?;
 
-        let mut mls_key_package = OpenMlsKeyPackage::new();
+        // let mut mls_key_package = OpenMlsKeyPackage::new();
 
-        let (credential_with_key, signature_keypair) = mls_key_package
-            .generate_credential_with_key(identity.verifying_key.to_bytes().to_vec());
+        // let (credential_with_key, signature_keypair) = mls_key_package
+        //     .generate_credential_with_key(identity.verifying_key.to_bytes().to_vec());
 
-        let key_package_bundle =
-            mls_key_package.generate_key_package(&credential_with_key, &signature_keypair)?;
+        // let key_package_bundle =
+        //     mls_key_package.generate_key_package(&credential_with_key, &signature_keypair)?;
 
         // debug!(
         //     "Successfully created key package bundle: {:?}",
@@ -59,15 +60,19 @@ impl App {
         // Initialize network manager
         let network_manager = Arc::new(NetworkManager::new(network_config).await?);
 
-        let processor = crate::processor::Processor::new(Arc::clone(&network_manager));
+        let (command_sender, command_receiver) = tokio::sync::mpsc::channel::<Command>(50);
 
-        let stdin_handle = processor.spawn_stdin_input_task(&self.config.chat_id);
+        let processor = Processor::new(identity, Arc::clone(&network_manager));
+
+        let stdin_handle = processor.spawn_stdin_input_task(command_sender.clone());
+        let command_handle = processor.spawn_command_handler_task(command_receiver);
 
         // Wait for tasks to complete (they run indefinitely)
         // The stdin_input_handle is the only one designed to finish, triggering a shutdown.
         tokio::select! {
             // _ = udp_intake_handle => debug!("UDP intake task completed unexpectedly."),
             // _ = display_handle => debug!("Display task completed unexpectedly."),
+            _ = command_handle => debug!("Command task completed unexpectedly."),
             _ = stdin_handle => debug!("Stdin task complete. Shutting down."),
         }
 

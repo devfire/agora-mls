@@ -5,7 +5,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 
 use ssh_key::PrivateKey;
 use zeroize::Zeroizing;
-#[derive(Clone)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub struct MyIdentity {
     // Our Ed25519 identity (for signatures/verification from the SSH key)
     pub signing_key: SigningKey,     // comes from the SSH private key
