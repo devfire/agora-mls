@@ -21,7 +21,7 @@ impl Processor {
     /// Spawn a task to handle user input from stdin.
     pub fn spawn_stdin_input_task(
         &self,
-        sender: tokio::sync::mpsc::UnboundedSender<Command>,
+        sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         // let network_manager = Arc::clone(&self.network_manager);
         let handle = self.identity.handle.clone();
@@ -55,14 +55,10 @@ impl Processor {
                                 Ok(c) => {
                                     debug!("Command entered: {:?}", c);
                                     debug!("Attempting to send command to handler task...");
-                                    match sender.send(c) {
-                                        Ok(()) => {
-                                            debug!("Command successfully sent to handler task");
-                                        }
-                                        Err(e) => {
-                                            error!("Failed to send command: {e}");
-                                        }
-                                    }
+                                    sender
+                                        .send(line.trim_start_matches('/').to_string())
+                                        .await
+                                        .expect("Failed to send command to handler task");
                                 }
                                 Err(e) => {
                                     // Check if this is a help request
@@ -76,7 +72,6 @@ impl Processor {
                                 }
                             }
                         }
-                        debug!("Stdin input read line: {}", line);
 
                         // encrypt the packet here
                     }
@@ -87,10 +82,11 @@ impl Processor {
                         let system_message = ApplicationMessage {
                             content: mic_drop.clone(),
                         };
-                        
+
                         // Give a small delay to allow any pending commands to be processed
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                        std::process::exit(0);
+                        // tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        // std::process::exit(0);
+                        break;
                     }
                     Err(err) => {
                         error!("Error: {err}");
@@ -103,50 +99,58 @@ impl Processor {
 
     pub fn spawn_command_handler_task(
         &self,
-        mut receiver: tokio::sync::mpsc::UnboundedReceiver<Command>,
+        mut receiver: tokio::sync::mpsc::Receiver<String>,
     ) -> tokio::task::JoinHandle<()> {
         let identity_handle = self.identity.handle.clone();
-        tokio::task::spawn_blocking(move || {
-            debug!("Command handler task for agent '{}' starting", identity_handle);
-            
-            // Create a new runtime for this blocking task
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                while let Some(command) = receiver.recv().await {
-                    debug!("Command handler received command: {:?}", command);
-                        match command {
-                            Command::Quit => {
-                                debug!("Quit command received. Exiting command handler task.");
-                                break; // Exit the loop to terminate the task gracefully
-                            }
-                            Command::Join { channel, password } => {
-                                debug!("Join command received - Channel: {}, Password: {:?}", channel, password);
-                                // TODO: Implement channel joining logic
-                            }
-                            Command::Leave { channel } => {
-                                debug!("Leave command received - Channel: {:?}", channel);
-                                // TODO: Implement channel leaving logic
-                            }
-                            Command::Msg { user, message } => {
-                                debug!("Message command received - User: {}, Message: {:?}", user, message);
-                                // TODO: Implement private messaging logic
-                            }
-                            Command::Nick { nickname } => {
-                                debug!("Nick command received - New nickname: {}", nickname);
-                                // TODO: Implement nickname change logic
-                            }
-                            Command::Users => {
-                                debug!("Users command received");
-                                // TODO: Implement user listing logic
-                            }
-                            Command::Channels => {
-                                debug!("Channels command received");
-                                // TODO: Implement channel listing logic
-                            }
-                        }
-               }
-               debug!("Command handler task terminated for agent '{}'", identity_handle);
-           })
-       })
-   }
+        tokio::spawn(async move {
+            debug!(
+                "Command handler task for agent '{}' starting",
+                identity_handle
+            );
+
+            while let Some(command) = receiver.recv().await {
+                debug!("Command handler received command: {:?}", command);
+                // match command {
+                //     Command::Quit => {
+                //         debug!("Quit command received. Exiting command handler task.");
+                //         break; // Exit the loop to terminate the task gracefully
+                //     }
+                //     Command::Join { channel, password } => {
+                //         debug!(
+                //             "Join command received - Channel: {}, Password: {:?}",
+                //             channel, password
+                //         );
+                //         // TODO: Implement channel joining logic
+                //     }
+                //     Command::Leave { channel } => {
+                //         debug!("Leave command received - Channel: {:?}", channel);
+                //         // TODO: Implement channel leaving logic
+                //     }
+                //     Command::Msg { user, message } => {
+                //         debug!(
+                //             "Message command received - User: {}, Message: {:?}",
+                //             user, message
+                //         );
+                //         // TODO: Implement private messaging logic
+                //     }
+                //     Command::Nick { nickname } => {
+                //         debug!("Nick command received - New nickname: {}", nickname);
+                //         // TODO: Implement nickname change logic
+                //     }
+                //     Command::Users => {
+                //         debug!("Users command received");
+                //         // TODO: Implement user listing logic
+                //     }
+                //     Command::Channels => {
+                //         debug!("Channels command received");
+                //         // TODO: Implement channel listing logic
+                //     }
+                // }
+            }
+            debug!(
+                "Command handler task terminated for agent '{}'",
+                identity_handle
+            );
+        })
+    }
 }
