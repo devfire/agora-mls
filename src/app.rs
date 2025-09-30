@@ -60,7 +60,7 @@ impl App {
         // Initialize network manager
         let network_manager = Arc::new(NetworkManager::new(network_config).await?);
 
-        let (command_sender, command_receiver) = tokio::sync::mpsc::channel::<String>(100);
+        let (command_sender, command_receiver) = tokio::sync::mpsc::channel::<Command>(100);
 
         let processor = Processor::new(identity, Arc::clone(&network_manager));
 
