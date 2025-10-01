@@ -13,7 +13,7 @@ pub struct CommandWrapper {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Join a channel
-    Join {
+    Invite {
         /// Channel name to join
         #[arg(help = "Name of the channel to join")]
         channel: String,

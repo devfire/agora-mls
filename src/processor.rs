@@ -128,7 +128,7 @@ impl Processor {
                 debug!("Command handler received command: {:?}", command);
 
                 match command {
-                    Command::Join { channel, password } => todo!(),
+                    Command::Invite { channel, password } => todo!(),
                     Command::Leave { channel } => todo!(),
                     Command::Msg { user, message } => todo!(),
                     Command::Nick { nickname } => todo!(),
@@ -138,7 +138,7 @@ impl Processor {
                             .await;
                         match reply {
                             Ok(current_state) => {
-                                debug!("Current state received: {}", current_state);
+                                debug!("Current state received: {:?}", current_state);
                                 // Process the current state as needed
                             }
                             Err(e) => {

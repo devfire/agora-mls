@@ -23,15 +23,11 @@ pub struct StateActor {
     membership: HashMap<VerifyingKey, Vec<Channel>>, // Maps handle to channels
 }
 
-#[derive(Reply)]
-pub struct CurrentState {
-    pub status: bool,
-}
-
-impl std::fmt::Display for CurrentState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "CurrentState {{ status: {} }}", self.status)
-    }
+#[derive(Reply, Debug)]
+pub enum Reply {
+    Users(Option<Vec<String>>),
+    Channels(Option<Vec<String>>),
+    Success,
 }
 
 #[derive(Debug)]
@@ -44,13 +40,13 @@ pub enum Request {
 
 impl Message<Request> for StateActor {
     // https://docs.page/tqwewe/kameo/core-concepts/replies
-    type Reply = CurrentState;
+    type Reply = Reply;
 
     async fn handle(&mut self, msg: Request, _: &mut Context<Self, Self::Reply>) -> Self::Reply {
         // Logic to process the message and generate a reply
         debug!("CommandHandler received command: {:?}", msg);
         match msg {
-            Request::GetUsers(_) => CurrentState { status: true },
+            Request::GetUsers(_) => Reply::Success,
             Request::GetChannels => todo!(),
             Request::QuitChannel(_) => todo!(),
             Request::JoinChannel(_, _) => todo!(),

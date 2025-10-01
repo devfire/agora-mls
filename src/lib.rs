@@ -6,7 +6,7 @@ pub mod key_package;
 pub mod network;
 pub mod processor;
 pub mod command;
-pub mod app_state;
+// pub mod app_state;
 pub mod state_actor;
 
 // Re-export commonly used items for easier access
