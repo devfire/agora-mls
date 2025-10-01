@@ -4,9 +4,10 @@ use crate::{
     identity::MyIdentity,
     network::{NetworkConfigBuilder, NetworkManager},
     processor::Processor,
+    state_actor::StateActor,
 };
 use anyhow::Result;
-
+use kameo::prelude::*;
 use std::sync::Arc;
 
 // use openmls::group::{MlsGroup, MlsGroupCreateConfig};
@@ -62,12 +63,13 @@ impl App {
 
         let (command_sender, command_receiver) = tokio::sync::mpsc::channel::<Command>(100);
 
+        let state_actor = StateActor::spawn(StateActor::default());
         let processor = Processor::new(identity, Arc::clone(&network_manager));
 
         // Note the distinct lack of .await here - we want to spawn these tasks and let them run concurrently
         // rather than waiting for each to complete before starting the next.
         let stdin_handle = processor.spawn_stdin_input_task(command_sender);
-        let command_handle = processor.spawn_command_handler_task(command_receiver);
+        let command_handle = processor.spawn_command_handler_task(state_actor, command_receiver);
 
         // Wait for tasks to complete (they run indefinitely)
         // The stdin_input_handle is the only one designed to finish, triggering a shutdown.

@@ -7,7 +7,7 @@ pub mod network;
 pub mod processor;
 pub mod command;
 pub mod app_state;
-
+pub mod state_actor;
 
 // Re-export commonly used items for easier access
 pub use crate::cli::ChatArgs;

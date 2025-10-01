@@ -1,22 +1,32 @@
-// src/processor.rs
-
-use std::sync::Arc;
-
+use kameo::Actor;
+use kameo::prelude::ActorRef;
 use rustyline::{DefaultEditor, error::ReadlineError};
+use std::sync::Arc;
 use tracing::{debug, error};
 
-use crate::{command::Command, identity::MyIdentity, network};
+use crate::{
+    command::Command,
+    identity::MyIdentity,
+    network,
+    state_actor::{Request, StateActor},
+};
 
 pub struct Processor {
     pub identity: MyIdentity,
     pub network_manager: Arc<network::NetworkManager>,
+    // pub state_actor: ActorRef<StateActor>,
 }
 
 impl Processor {
-    pub fn new(identity: MyIdentity, network_manager: Arc<network::NetworkManager>) -> Self {
+    pub fn new(
+        // state_actor: ActorRef<StateActor>,
+        identity: MyIdentity,
+        network_manager: Arc<network::NetworkManager>,
+    ) -> Self {
         Self {
             identity,
             network_manager,
+            // state_actor,
         }
     }
 
@@ -72,10 +82,7 @@ impl Processor {
                                     debug!("Command entered: {:?}", c);
                                     debug!("Attempting to send command to handler task...");
                                     // Use blocking_send since we're in a blocking context
-                                    if sender
-                                        .blocking_send(c)
-                                        .is_err()
-                                    {
+                                    if sender.blocking_send(c).is_err() {
                                         error!(
                                             "Failed to send command: receiver has been dropped."
                                         );
@@ -107,6 +114,7 @@ impl Processor {
 
     pub fn spawn_command_handler_task(
         &self,
+        state_actor: ActorRef<StateActor>,
         mut receiver: tokio::sync::mpsc::Receiver<Command>,
     ) -> tokio::task::JoinHandle<()> {
         let identity_handle = self.identity.handle.clone();
@@ -118,6 +126,29 @@ impl Processor {
 
             while let Some(command) = receiver.recv().await {
                 debug!("Command handler received command: {:?}", command);
+
+                match command {
+                    Command::Join { channel, password } => todo!(),
+                    Command::Leave { channel } => todo!(),
+                    Command::Msg { user, message } => todo!(),
+                    Command::Nick { nickname } => todo!(),
+                    Command::Users => {
+                        let reply = state_actor
+                            .ask(Request::GetUsers("some_channel".into()))
+                            .await;
+                        match reply {
+                            Ok(current_state) => {
+                                debug!("Current state received: {}", current_state);
+                                // Process the current state as needed
+                            }
+                            Err(e) => {
+                                error!("Failed to get current state: {}", e);
+                            }
+                        }
+                    }
+                    Command::Channels => todo!(),
+                    Command::Quit => todo!(),
+                };
                 // The rest of your command handling logic
             }
             debug!(
