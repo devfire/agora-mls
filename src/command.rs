@@ -43,6 +43,11 @@ pub enum Command {
     Users,
     /// List available channels
     Channels,
+    /// Display or set your nickname
+    Nick {
+        /// New nickname
+        nickname: Option<String>,
+    },
 
     /// Quit the application
     #[command(alias = "q")]

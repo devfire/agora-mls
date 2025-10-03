@@ -37,30 +37,53 @@ pub enum Reply {
     ChatHandle(String),
 }
 
+// implement Display for Reply
+impl std::fmt::Display for Reply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Reply::Users(Some(users)) => write!(f, "Users: {:?}", users),
+            Reply::Users(None) => write!(f, "No users found"),
+            Reply::Channels(Some(channels)) => write!(f, "Channels: {:?}", channels),
+            Reply::Channels(None) => write!(f, "No channels found"),
+            Reply::Success => write!(f, "Success"),
+            Reply::ChatHandle(handle) => write!(f, "{handle}"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Request {
     OriginalCommand(Command), // pass the original command for processing
-    GetUsers(String),      // get all the users for the given channel
-    GetChannels,           // get all the channels
-    QuitChannel(String),   // quit the given channel
-    CreateChannel(String), // join the given channel with optional password
-    ChatHandle,            // get my chat handle
+    GetUsers(String),         // get all the users for the given channel
+    GetChannels,              // get all the channels
+    QuitChannel(String),      // quit the given channel
+    CreateChannel(String),    // join the given channel with optional password
+    ChatHandle,               // get my chat handle
 }
 
-impl Message<Request> for StateActor {
+impl Message<Command> for StateActor {
     // https://docs.page/tqwewe/kameo/core-concepts/replies
     type Reply = Reply;
 
-    async fn handle(&mut self, msg: Request, _: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(&mut self, msg: Command, _: &mut Context<Self, Self::Reply>) -> Self::Reply {
         // Logic to process the message and generate a reply
         debug!("CommandHandler received command: {:?}", msg);
         match msg {
-            Request::GetUsers(_) => todo!(),
-            Request::GetChannels => todo!(),
-            Request::QuitChannel(_) => todo!(),
-            Request::CreateChannel(_) => todo!(),
-            Request::ChatHandle => Reply::ChatHandle(self.identity.handle.clone()),
-            Request::OriginalCommand(command) => todo!(),
+            Command::Invite { channel, password } => todo!(),
+            Command::Leave { channel } => todo!(),
+            Command::Msg { user, message } => todo!(),
+            Command::Create { name } => todo!(),
+            Command::Users => todo!(),
+            Command::Channels => todo!(),
+            Command::Quit => todo!(),
+            Command::Nick { nickname } => {
+                if let Some(nick) = nickname {
+                    self.identity.handle = nick;
+                    Reply::Success
+                } else {
+                    Reply::ChatHandle(self.identity.handle.clone())
+                }
+            },
         }
     }
 }

@@ -71,7 +71,7 @@ impl Processor {
             let rt = tokio::runtime::Handle::current();
             let identity_handle = rt.block_on(async {
                 match state_actor
-                    .ask(Request::ChatHandle)
+                    .ask(Command::Nick { nickname: None })
                     .await
                     .expect("Unable to get chat handle")
                 {
@@ -135,9 +135,10 @@ impl Processor {
         // let identity_handle = self.identity.handle.clone();
         tokio::spawn(async move {
             let identity_handle = state_actor
-                .ask(Request::ChatHandle)
+                .ask(Command::Nick { nickname: None })
                 .await
                 .expect("Unable to get chat handle");
+            debug!("Starting command handler task for user '{}'", identity_handle);
             while let Some(command) = receiver.recv().await {
                 debug!("Command handler received command: {:?}", command);
 
