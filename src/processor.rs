@@ -7,7 +7,7 @@ use crate::{
     command::Command,
     identity::MyIdentity,
     network,
-    state_actor::{Request, StateActor},
+    state_actor::{Reply, Request, StateActor},
 };
 
 pub struct Processor {
@@ -66,12 +66,21 @@ impl Processor {
                 }
             };
 
-            let identity_handle = state_actor
-                .ask(Request::ChatHandle)
-                .await
-                .expect("Unable to get chat handle");
+            // The problem here is that spawn_blocking runs on a separate thread pool that doesn't have access to the async runtime, so we can't use .await directly inside it.
+            // So, tokio::runtime::Handle::current().block_on() is to bridge the gap between the blocking and async contexts.
+            let rt = tokio::runtime::Handle::current();
+            let identity_handle = rt.block_on(async {
+                match state_actor
+                    .ask(Request::ChatHandle)
+                    .await
+                    .expect("Unable to get chat handle")
+                {
+                    Reply::ChatHandle(handle) => handle,
+                    _ => panic!("Expected ChatHandle reply"),
+                }
+            });
             loop {
-                let readline = rustyline_editor.readline(&format!("{} > ", handle));
+                let readline = rustyline_editor.readline(&format!("{} > ", identity_handle));
 
                 match readline {
                     Ok(line) => {

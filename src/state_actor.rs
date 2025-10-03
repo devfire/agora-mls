@@ -26,6 +26,7 @@ pub struct StateActor {
     key_package_bundle: KeyPackageBundle,
     users: Vec<VerifyingKey>,
     membership: HashMap<VerifyingKey, Vec<Channel>>, // Maps handle to channels
+    identity: MyIdentity,
 }
 
 #[derive(Reply, Debug)]
@@ -33,10 +34,12 @@ pub enum Reply {
     Users(Option<Vec<String>>),
     Channels(Option<Vec<String>>),
     Success,
+    ChatHandle(String),
 }
 
 #[derive(Debug)]
 pub enum Request {
+    OriginalCommand(Command), // pass the original command for processing
     GetUsers(String),      // get all the users for the given channel
     GetChannels,           // get all the channels
     QuitChannel(String),   // quit the given channel
@@ -56,7 +59,8 @@ impl Message<Request> for StateActor {
             Request::GetChannels => todo!(),
             Request::QuitChannel(_) => todo!(),
             Request::CreateChannel(_) => todo!(),
-            Request::ChatHandle => Reply::Success,
+            Request::ChatHandle => Reply::ChatHandle(self.identity.handle.clone()),
+            Request::OriginalCommand(command) => todo!(),
         }
     }
 }
@@ -75,6 +79,7 @@ impl StateActor {
             key_package_bundle,
             users: vec![],
             membership: HashMap::new(),
+            identity,
         }
     }
 }
