@@ -1,9 +1,12 @@
-use std::{collections::HashMap, hash::Hash};
+use std::collections::HashMap;
 
 use ed25519_dalek::VerifyingKey;
+use openmls::prelude::KeyPackageBundle;
 use tracing::debug;
 
 use kameo::prelude::*;
+
+use crate::{OpenMlsKeyPackage, command::Command, identity::MyIdentity};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Channel {
@@ -17,8 +20,10 @@ impl std::fmt::Display for Channel {
 }
 // Define the state actor
 /// This actor holds the current state of the application.
-#[derive(Default, Actor)]
+#[derive(Actor)]
 pub struct StateActor {
+    mls_key_package: OpenMlsKeyPackage,
+    key_package_bundle: KeyPackageBundle,
     users: Vec<VerifyingKey>,
     membership: HashMap<VerifyingKey, Vec<Channel>>, // Maps handle to channels
 }
@@ -32,10 +37,11 @@ pub enum Reply {
 
 #[derive(Debug)]
 pub enum Request {
-    GetUsers(String),                    // get all the users for the given channel
-    GetChannels,                         // get all the channels
-    QuitChannel(String),                 // quit the given channel
-    JoinChannel(String, Option<String>), // join the given channel with optional password
+    GetUsers(String),      // get all the users for the given channel
+    GetChannels,           // get all the channels
+    QuitChannel(String),   // quit the given channel
+    CreateChannel(String), // join the given channel with optional password
+    ChatHandle,            // get my chat handle
 }
 
 impl Message<Request> for StateActor {
@@ -46,10 +52,29 @@ impl Message<Request> for StateActor {
         // Logic to process the message and generate a reply
         debug!("CommandHandler received command: {:?}", msg);
         match msg {
-            Request::GetUsers(_) => Reply::Success,
+            Request::GetUsers(_) => todo!(),
             Request::GetChannels => todo!(),
             Request::QuitChannel(_) => todo!(),
-            Request::JoinChannel(_, _) => todo!(),
+            Request::CreateChannel(_) => todo!(),
+            Request::ChatHandle => Reply::Success,
+        }
+    }
+}
+
+impl StateActor {
+    pub fn new(identity: MyIdentity) -> Self {
+        let mut mls_key_package = OpenMlsKeyPackage::new();
+        let (credential_with_key, signature_keypair) = mls_key_package
+            .generate_credential_with_key(identity.verifying_key.to_bytes().to_vec());
+
+        let key_package_bundle = mls_key_package
+            .generate_key_package_bundle(&credential_with_key, &signature_keypair)
+            .expect("Failed to create key package bundle");
+        Self {
+            mls_key_package,
+            key_package_bundle,
+            users: vec![],
+            membership: HashMap::new(),
         }
     }
 }

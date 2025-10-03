@@ -1,4 +1,5 @@
 use crate::{
+    OpenMlsKeyPackage,
     command::Command,
     config::Config,
     identity::MyIdentity,
@@ -35,18 +36,18 @@ impl App {
         //     .generate_credential_with_key(identity.verifying_key.to_bytes().to_vec());
 
         // let key_package_bundle =
-        //     mls_key_package.generate_key_package(&credential_with_key, &signature_keypair)?;
+        //     mls_key_package.generate_key_package_bundle(&credential_with_key, &signature_keypair)?;
 
         // debug!(
         //     "Successfully created key package bundle: {:?}",
         //     key_package_bundle
         // );
 
-        // // Now start a new group ...
-        // let mut group = MlsGroup::new(
+        // Now start a new group ...
+        // let mut group = openmls::group::MlsGroup::new(
         //     &mls_key_package.provider,
         //     &signature_keypair,
-        //     &MlsGroupCreateConfig::default(),
+        //     &openmls::group::MlsGroupCreateConfig::default(),
         //     credential_with_key,
         // )?;
 
@@ -63,12 +64,12 @@ impl App {
 
         let (command_sender, command_receiver) = tokio::sync::mpsc::channel::<Command>(100);
 
-        let state_actor = StateActor::spawn(StateActor::default());
-        let processor = Processor::new(identity, Arc::clone(&network_manager));
+        let state_actor = StateActor::spawn(StateActor::new(identity));
+        let processor = Processor::new(Arc::clone(&network_manager));
 
         // Note the distinct lack of .await here - we want to spawn these tasks and let them run concurrently
         // rather than waiting for each to complete before starting the next.
-        let stdin_handle = processor.spawn_stdin_input_task(command_sender);
+        let stdin_handle = processor.spawn_stdin_input_task(state_actor.clone(), command_sender);
         let command_handle = processor.spawn_command_handler_task(state_actor, command_receiver);
 
         // Wait for tasks to complete (they run indefinitely)

@@ -4,6 +4,7 @@ use openmls_rust_crypto::OpenMlsRustCrypto;
 
 use anyhow::{Context, Result};
 
+#[derive(Debug)]
 pub struct OpenMlsKeyPackage {
     // client_identity: Vec<u8>, // Public key loaded from SSH ED25519 format
 
@@ -54,7 +55,7 @@ impl OpenMlsKeyPackage {
     }
 
     // A helper to create key package bundles.
-    pub fn generate_key_package(
+    pub fn generate_key_package_bundle(
         &mut self,
         credential_with_key: &CredentialWithKey,
         signer: &SignatureKeyPair,

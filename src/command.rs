@@ -34,10 +34,10 @@ pub enum Command {
         #[arg(trailing_var_arg = true)]
         message: Vec<String>,
     },
-    /// Change nickname
-    Nick {
-        /// New nickname
-        nickname: String,
+    /// Create a new group
+    Create {
+        /// New group name
+        name: String,
     },
     /// List users in current channel
     Users,
