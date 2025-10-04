@@ -66,7 +66,7 @@ impl Message<Command> for StateActor {
     // https://docs.page/tqwewe/kameo/core-concepts/replies
     type Reply = Reply;
 
-    async fn handle(&mut self, msg: Command, _: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(&mut self, msg: Command, ctx: &mut kameo::message::Context<Self, Reply>) -> Self::Reply {
         // Logic to process the message and generate a reply
         debug!("CommandHandler received command: {:?}", msg);
         match msg {

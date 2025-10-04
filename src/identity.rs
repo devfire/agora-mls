@@ -36,7 +36,7 @@ impl Message<IdentityRequest> for MyIdentity {
     async fn handle(
         &mut self,
         msg: IdentityRequest,
-        _: &mut Context<Self, Self::Reply>,
+        _ctx: &mut kameo::message::Context<Self, IdentityReply>,
     ) -> Self::Reply {
         // Logic to process the message and generate a reply
         // debug!("CommandHandler received command: {:?}", msg);
