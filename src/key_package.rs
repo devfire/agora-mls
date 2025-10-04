@@ -1,17 +1,16 @@
+use kameo::actor::ActorRef;
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::OpenMlsRustCrypto;
 
-use anyhow::{Context, Result};
-
-use crate::identity::MyIdentity;
+use crate::identity_actor::{IdentityActor, IdentityRequest};
 
 #[derive(Debug)]
 pub struct OpenMlsIdentity {
     // client_identity: Vec<u8>, // Public key loaded from SSH ED25519 format
 
     // ... and the crypto provider to use.
-    pub provider: OpenMlsRustCrypto,
+    // pub provider: OpenMlsRustCrypto,
     pub ciphersuite: Ciphersuite,
     pub signature_algorithm: SignatureScheme,
     pub mls_key_package: KeyPackageBundle,
@@ -92,18 +91,26 @@ impl OpenMlsIdentity {
     //         .context("Error creating key package bundle.")
     // }
 
-    pub fn new(identity: &MyIdentity) -> Self {
+    pub async fn new(identity: ActorRef<IdentityActor>) -> Self {
         let ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519;
+        let provider = &OpenMlsRustCrypto::default();
 
-        let credential = BasicCredential::new(identity.verifying_key.to_bytes().to_vec());
+
+        let verifying_key = identity
+            .ask(IdentityRequest)
+            .await
+            .expect("Failed to get verifying key from IdentityActor.")
+            .verifying_key;
+
+        let credential = BasicCredential::new(verifying_key.to_bytes().to_vec());
         let signature_keypair = SignatureKeyPair::new(ciphersuite.signature_algorithm())
             .expect("Error generating a signature key pair.");
 
         //     // Store the signature key into the key store so OpenMLS has access
         //     // to it.
-        //     signature_key_pair
-        //         .store(self.provider.storage())
-        //         .expect("Error storing signature keys in key store.");
+        signature_keypair
+            .store(provider.storage())
+            .expect("Error storing signature keys in key store.");
 
         //     // self.signature_keypair = Some(signature_key_pair);
         let credential_with_key = CredentialWithKey {
@@ -123,7 +130,6 @@ impl OpenMlsIdentity {
             .expect("Error creating key package bundle.");
 
         OpenMlsIdentity {
-            provider: OpenMlsRustCrypto::default(),
             ciphersuite,
             signature_algorithm: ciphersuite.signature_algorithm(),
             mls_key_package,

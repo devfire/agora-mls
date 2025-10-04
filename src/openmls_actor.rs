@@ -1,0 +1,75 @@
+use kameo::prelude::*;
+use openmls::prelude::*;
+use openmls_basic_credential::SignatureKeyPair;
+use openmls_rust_crypto::OpenMlsRustCrypto;
+
+use crate::identity_actor::{IdentityActor, IdentityRequest};
+
+#[derive(Actor,Debug)]
+pub struct OpenMlsIdentityActor {
+    // client_identity: Vec<u8>, // Public key loaded from SSH ED25519 format
+    pub ciphersuite: Ciphersuite,
+    pub signature_algorithm: SignatureScheme,
+    pub mls_key_package: KeyPackageBundle,
+    pub credential_with_key: CredentialWithKey,
+    pub signature_keypair: SignatureKeyPair,
+}
+
+impl OpenMlsIdentityActor {
+    /// Creates a new OpenMLS identity with cryptographic keys and credentials.
+    ///
+    /// Generates a signature keypair, creates a basic credential from the provided
+    /// identity's verifying key, and builds a key package for MLS protocol use.
+    ///
+    /// # Arguments
+    /// * `identity` - Reference to the IdentityActor to obtain the verifying key
+    ///
+    /// # Panics
+    /// * If unable to get verifying key from IdentityActor
+    /// * If signature keypair generation fails
+    /// * If key storage or key package creation fails
+    pub async fn new(identity: &ActorRef<IdentityActor>) -> Self {
+        let ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519;
+        let provider = &OpenMlsRustCrypto::default();
+
+        let verifying_key = identity
+            .ask(IdentityRequest)
+            .await
+            .expect("Failed to get verifying key from IdentityActor.")
+            .verifying_key;
+
+        let credential = BasicCredential::new(verifying_key.to_bytes().to_vec());
+        let signature_keypair = SignatureKeyPair::new(ciphersuite.signature_algorithm())
+            .expect("Error generating a signature key pair.");
+
+        //     // Store the signature key into the key store so OpenMLS has access to it.
+        signature_keypair
+            .store(provider.storage())
+            .expect("Error storing signature keys in key store.");
+
+        //     // self.signature_keypair = Some(signature_key_pair);
+        let credential_with_key = CredentialWithKey {
+            credential: credential.clone().into(),
+            signature_key: signature_keypair.public().into(),
+        };
+
+        // let mut mls_key_package = OpenMlsIdentity::new();
+
+        let mls_key_package = KeyPackage::builder()
+            .build(
+                ciphersuite,
+                &OpenMlsRustCrypto::default(),
+                &signature_keypair,
+                credential_with_key.clone(),
+            )
+            .expect("Error creating key package bundle.");
+
+        OpenMlsIdentityActor {
+            ciphersuite,
+            signature_algorithm: ciphersuite.signature_algorithm(),
+            mls_key_package,
+            signature_keypair,
+            credential_with_key,
+        }
+    }
+}

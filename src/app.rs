@@ -1,11 +1,11 @@
 use crate::{
-    // OpenMlsKeyPackage,
     command::Command,
     config::Config,
-    identity::MyIdentity,
+    identity_actor::IdentityActor,
     network::{NetworkConfigBuilder, NetworkManager},
+    openmls_actor::OpenMlsIdentityActor,
     processor::Processor,
-    state_actor::StateActor, OpenMlsIdentity,
+    state_actor::StateActor,
 };
 use anyhow::Result;
 use kameo::prelude::*;
@@ -28,14 +28,14 @@ impl App {
         debug!("Using configuration: {:?}", self.config);
 
         // // Let me establish my identity first
-        let identity = MyIdentity::new(&self.config.key_file, &self.config.chat_id)?;
+        // let identity = MyIdentity::new(&self.config.key_file, &self.config.chat_id)?;
 
         // Create an OpenMLS identity from my identity
         // This involves generating a signature key pair and a key package bundle
         // based on my verifying key (public key).
         // This is needed to participate in MLS groups.
         // The OpenMlsKeyPackage struct encapsulates this logic.
-        let mls_identity = OpenMlsIdentity::new(&identity);
+        // let mls_identity = OpenMlsIdentity::new(&identity);
 
         // let mut mls_key_package = OpenMlsKeyPackage::new();
 
@@ -70,14 +70,26 @@ impl App {
         let network_manager = Arc::new(NetworkManager::new(network_config).await?);
 
         let (command_sender, command_receiver) = tokio::sync::mpsc::channel::<Command>(100);
+        let identity_actor_ref = IdentityActor::spawn(IdentityActor::new(
+            &self.config.key_file,
+            &self.config.chat_id,
+        )?);
 
-        let state_actor = StateActor::spawn(StateActor::new());
+        let openmls_identity_actor_ref =
+            OpenMlsIdentityActor::spawn(OpenMlsIdentityActor::new(&identity_actor_ref).await);
+
+        let state_actor_ref = StateActor::spawn(StateActor::new(identity_actor_ref.clone(),
+            openmls_identity_actor_ref.clone()));
+
+        // Kick off the processor & share everything it needs
         let processor = Processor::new(Arc::clone(&network_manager));
 
         // Note the distinct lack of .await here - we want to spawn these tasks and let them run concurrently
         // rather than waiting for each to complete before starting the next.
-        let stdin_handle = processor.spawn_stdin_input_task(state_actor.clone(), command_sender);
-        let command_handle = processor.spawn_command_handler_task(state_actor, command_receiver);
+        let stdin_handle =
+            processor.spawn_stdin_input_task(state_actor_ref.clone(), command_sender);
+        let command_handle =
+            processor.spawn_command_handler_task(state_actor_ref, command_receiver);
 
         // Wait for tasks to complete (they run indefinitely)
         // The stdin_input_handle is the only one designed to finish, triggering a shutdown.
