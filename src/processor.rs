@@ -5,9 +5,8 @@ use tracing::{debug, error};
 
 use crate::{
     command::Command,
-    identity::MyIdentity,
     network,
-    state_actor::{Reply, Request, StateActor},
+    state_actor::{Reply, StateActor},
 };
 
 pub struct Processor {
@@ -66,8 +65,9 @@ impl Processor {
                 }
             };
 
-            // The problem here is that spawn_blocking runs on a separate thread pool that doesn't have access to the async runtime, so we can't use .await directly inside it.
-            // So, tokio::runtime::Handle::current().block_on() is to bridge the gap between the blocking and async contexts.
+            // The problem here is that spawn_blocking runs on a separate thread pool that doesn't have access to the async runtime,
+            // so we can't use .await directly inside it.
+            // Therefore, tokio::runtime::Handle::current().block_on() is to bridge the gap between the blocking and async contexts.
             let rt = tokio::runtime::Handle::current();
             let identity_handle = rt.block_on(async {
                 match state_actor
@@ -138,7 +138,10 @@ impl Processor {
                 .ask(Command::Nick { nickname: None })
                 .await
                 .expect("Unable to get chat handle");
-            debug!("Starting command handler task for user '{}'", identity_handle);
+            debug!(
+                "Starting command handler task for user '{}'",
+                identity_handle
+            );
             while let Some(command) = receiver.recv().await {
                 debug!("Command handler received command: {:?}", command);
 

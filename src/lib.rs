@@ -12,7 +12,7 @@ pub mod state_actor;
 // Re-export commonly used items for easier access
 pub use crate::cli::ChatArgs;
 
-pub use crate::key_package::OpenMlsKeyPackage;
+pub use crate::key_package::OpenMlsIdentity;
 
 // Include the generated protobuf code
 // The build script outputs to src/ directory so rust-analyzer can find it

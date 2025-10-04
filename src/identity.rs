@@ -3,9 +3,11 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 
+use kameo::Reply;
+use kameo::prelude::*;
 use ssh_key::PrivateKey;
 use zeroize::Zeroizing;
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Eq, PartialEq, Debug, Clone, Actor)]
 pub struct MyIdentity {
     // Our Ed25519 identity (for signatures/verification from the SSH key)
     pub signing_key: SigningKey,     // comes from the SSH private key
@@ -13,6 +15,36 @@ pub struct MyIdentity {
 
     // User-friendly identifier (not cryptographically significant)
     pub handle: String,
+}
+
+#[derive(Debug)]
+pub enum IdentityRequest {
+    GetHandle,
+    GetVerifyingKey,
+}
+
+#[derive(Reply, Debug)]
+pub enum IdentityReply {
+    Handle(String),
+    VerifyingKey(VerifyingKey),
+}
+
+impl Message<IdentityRequest> for MyIdentity {
+    // https://docs.page/tqwewe/kameo/core-concepts/replies
+    type Reply = IdentityReply;
+
+    async fn handle(
+        &mut self,
+        msg: IdentityRequest,
+        _: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        // Logic to process the message and generate a reply
+        // debug!("CommandHandler received command: {:?}", msg);
+        match msg {
+            IdentityRequest::GetHandle => todo!(),
+            IdentityRequest::GetVerifyingKey => todo!(),
+        }
+    }
 }
 
 impl MyIdentity {

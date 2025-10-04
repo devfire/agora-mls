@@ -6,7 +6,11 @@ use tracing::debug;
 
 use kameo::prelude::*;
 
-use crate::{OpenMlsKeyPackage, command::Command, identity::MyIdentity};
+use crate::{
+    OpenMlsIdentity,
+    command::Command,
+    identity::{self, MyIdentity},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Channel {
@@ -22,11 +26,8 @@ impl std::fmt::Display for Channel {
 /// This actor holds the current state of the application.
 #[derive(Actor)]
 pub struct StateActor {
-    mls_key_package: OpenMlsKeyPackage,
-    key_package_bundle: KeyPackageBundle,
     users: Vec<VerifyingKey>,
     membership: HashMap<VerifyingKey, Vec<Channel>>, // Maps handle to channels
-    identity: MyIdentity,
 }
 
 #[derive(Reply, Debug)]
@@ -51,15 +52,15 @@ impl std::fmt::Display for Reply {
     }
 }
 
-#[derive(Debug)]
-pub enum Request {
-    OriginalCommand(Command), // pass the original command for processing
-    GetUsers(String),         // get all the users for the given channel
-    GetChannels,              // get all the channels
-    QuitChannel(String),      // quit the given channel
-    CreateChannel(String),    // join the given channel with optional password
-    ChatHandle,               // get my chat handle
-}
+// #[derive(Debug)]
+// pub enum Request {
+//     OriginalCommand(Command), // pass the original command for processing
+//     GetUsers(String),         // get all the users for the given channel
+//     GetChannels,              // get all the channels
+//     QuitChannel(String),      // quit the given channel
+//     CreateChannel(String),    // join the given channel with optional password
+//     ChatHandle,               // get my chat handle
+// }
 
 impl Message<Command> for StateActor {
     // https://docs.page/tqwewe/kameo/core-concepts/replies
@@ -77,32 +78,61 @@ impl Message<Command> for StateActor {
             Command::Channels => todo!(),
             Command::Quit => todo!(),
             Command::Nick { nickname } => {
-                if let Some(nick) = nickname {
-                    self.identity.handle = nick;
-                    Reply::Success
-                } else {
-                    Reply::ChatHandle(self.identity.handle.clone())
-                }
-            },
+                todo!()
+                // if let Some(nick) = nickname {
+                //     self.identity.handle = nick;
+                //     Reply::Success
+                // } else {
+                //     Reply::ChatHandle(self.identity.handle.clone())
+                // }
+            }
         }
     }
 }
 
 impl StateActor {
-    pub fn new(identity: MyIdentity) -> Self {
-        let mut mls_key_package = OpenMlsKeyPackage::new();
-        let (credential_with_key, signature_keypair) = mls_key_package
-            .generate_credential_with_key(identity.verifying_key.to_bytes().to_vec());
-
-        let key_package_bundle = mls_key_package
-            .generate_key_package_bundle(&credential_with_key, &signature_keypair)
-            .expect("Failed to create key package bundle");
+    pub fn new() -> Self {
         Self {
-            mls_key_package,
-            key_package_bundle,
             users: vec![],
             membership: HashMap::new(),
-            identity,
+            // identity: identity.clone(),
         }
+    }
+
+    fn create_mls_group(
+        &self,
+        identity: &MyIdentity,
+        mls_identity: &OpenMlsIdentity,
+    ) -> anyhow::Result<()> {
+        // Now start a new group ...
+        // let mut group = openmls::group::MlsGroup::new(
+        //     &mls_key_package.provider,
+        //     &signature_keypair,
+        //     &openmls::group::MlsGroupCreateConfig::default(),
+        //     credential_with_key,
+        // )?;
+
+        // let mut mls_key_package = OpenMlsKeyPackage::new();
+
+        // let (credential_with_key, signature_keypair) = mls_key_package
+        //     .generate_credential_with_key(identity.verifying_key.to_bytes().to_vec());
+
+        // let key_package_bundle =
+        //     mls_key_package.generate_key_package_bundle(&credential_with_key, &signature_keypair)?;
+
+        // debug!(
+        //     "Successfully created key package bundle: {:?}",
+        //     key_package_bundle
+        // );
+
+        // Now start a new group ...
+        // let mut group = openmls::group::MlsGroup::new(
+        //     mls_identity.mls_key_package.provider,
+        //     &self.mls_key_package,
+        //     &openmls::group::MlsGroupCreateConfig::default(),
+        //     credential_with_key,
+        // )?;
+
+        Ok(())
     }
 }

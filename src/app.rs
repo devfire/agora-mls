@@ -1,11 +1,11 @@
 use crate::{
-    OpenMlsKeyPackage,
+    // OpenMlsKeyPackage,
     command::Command,
     config::Config,
     identity::MyIdentity,
     network::{NetworkConfigBuilder, NetworkManager},
     processor::Processor,
-    state_actor::StateActor,
+    state_actor::StateActor, OpenMlsIdentity,
 };
 use anyhow::Result;
 use kameo::prelude::*;
@@ -29,6 +29,13 @@ impl App {
 
         // // Let me establish my identity first
         let identity = MyIdentity::new(&self.config.key_file, &self.config.chat_id)?;
+
+        // Create an OpenMLS identity from my identity
+        // This involves generating a signature key pair and a key package bundle
+        // based on my verifying key (public key).
+        // This is needed to participate in MLS groups.
+        // The OpenMlsKeyPackage struct encapsulates this logic.
+        let mls_identity = OpenMlsIdentity::new(&identity);
 
         // let mut mls_key_package = OpenMlsKeyPackage::new();
 
@@ -64,7 +71,7 @@ impl App {
 
         let (command_sender, command_receiver) = tokio::sync::mpsc::channel::<Command>(100);
 
-        let state_actor = StateActor::spawn(StateActor::new(identity));
+        let state_actor = StateActor::spawn(StateActor::new());
         let processor = Processor::new(Arc::clone(&network_manager));
 
         // Note the distinct lack of .await here - we want to spawn these tasks and let them run concurrently
