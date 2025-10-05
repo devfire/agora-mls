@@ -133,13 +133,13 @@ impl StateActor {
             .await
             .expect("Failed to get verifying key from IdentityActor.");
 
-        // // Now start a new group ...
-        // let mut group = openmls::group::MlsGroup::new(
-        //     &openmls_rust_crypto::OpenMlsRustCrypto::default(),
-        //     &mls_identity.signature_keypair,
-        //     &openmls::group::MlsGroupCreateConfig::default(),
-        //     credential_with_key,
-        // )?;
+        // Now start a new group ...
+        let mut group = openmls::group::MlsGroup::new(
+            &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+            &*mls_identity.signature_keypair,
+            &openmls::group::MlsGroupCreateConfig::default(),
+            mls_identity.credential_with_key,
+        )?;
 
         Ok(())
     }
