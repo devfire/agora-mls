@@ -2,12 +2,24 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use ed25519_dalek::VerifyingKey;
+use thiserror::Error;
 
-use tracing::debug;
+use tracing::{debug, error};
 
 use kameo::prelude::*;
 use openmls::prelude::*;
 
+// Define errors
+#[derive(Error, Debug, Clone)]
+pub enum StateActorError {
+    #[error("User not found")]
+    UserNotFound,
+    #[error("Channel not found")]
+    ChannelNotFound,
+
+    #[error("Channel creation failed")]
+    ChannelCreationFailed,
+}
 use crate::{
     command::Command,
     identity_actor::{IdentityActor, IdentityActorMsg},
@@ -32,14 +44,13 @@ pub struct StateActor {
     membership: HashMap<VerifyingKey, Vec<Channel>>, // Maps handle to channels
     identity_actor: ActorRef<IdentityActor>,
     mls_identity_actor: ActorRef<OpenMlsIdentityActor>,
-    group_names: HashMap<Vec<u8>, String>, // Maps group ID bytes to group name
 }
 
 #[derive(Reply, Debug)]
 pub enum Reply {
     Users(Option<Vec<String>>),
     Channels(Option<Vec<String>>),
-    Success,
+    Status(Result<(), StateActorError>), // Ok(()) for success, Err(StateActorError) for failure
     ChatHandle(String),
 }
 
@@ -51,7 +62,8 @@ impl std::fmt::Display for Reply {
             Reply::Users(None) => write!(f, "No users found"),
             Reply::Channels(Some(channels)) => write!(f, "Channels: {:?}", channels),
             Reply::Channels(None) => write!(f, "No channels found"),
-            Reply::Success => write!(f, "Success"),
+            Reply::Status(Ok(())) => write!(f, "Operation successful"),
+            Reply::Status(Err(e)) => write!(f, "Operation failed: {}", e),
             Reply::ChatHandle(handle) => write!(f, "{handle}"),
         }
     }
@@ -82,20 +94,44 @@ impl Message<Command> for StateActor {
             Command::Invite { channel, password } => todo!(),
             Command::Leave { channel } => todo!(),
             Command::Msg { user, message } => todo!(),
-            Command::Create { name } => todo!(),
+            Command::Create { name } => {
+                if let Err(e) = self.create_mls_group(&name).await {
+                    error!("Failed to create MLS group '{}': {e}", name);
+                    Reply::Status(Err(StateActorError::ChannelCreationFailed))
+                } else {
+                    debug!("Successfully created MLS group '{}'", name);
+                    Reply::Status(Ok(()))
+                }
+            }
             Command::Users => todo!(),
-            Command::Channels => todo!(),
+            Command::Channels => {
+                todo!()
+                // if self.users.is_empty() {
+                //     Reply::Channels(None)
+                // } else {
+                //     let channel_list: Vec<String> = self
+                //         .users
+                //         .iter()
+                //         .map(|vk| vk.to_bytes())
+                //         .filter_map(|bytes| self.group_names.get(&bytes).cloned())
+                //         .collect();
+                //     if channel_list.is_empty() {
+                //         Reply::Channels(None)
+                //     } else {
+                //         Reply::Channels(Some(channel_list))
+                //     }
+                // }
+            }
             Command::Quit => todo!(),
             Command::Nick { nickname } => {
                 if let Some(nick) = nickname {
-                    let identity = self
-                        .identity_actor
+                    self.identity_actor
                         .tell(IdentityActorMsg {
                             handle_update: Some(nick),
                         })
                         .await
                         .expect("Failed to set identity in IdentityActor.");
-                    Reply::Success
+                    Reply::Status(Ok(()))
                 } else {
                     let identity = self
                         .identity_actor
@@ -121,7 +157,6 @@ impl StateActor {
             membership: HashMap::new(),
             identity_actor,
             mls_identity_actor,
-            group_names: HashMap::new(),
         }
     }
 
