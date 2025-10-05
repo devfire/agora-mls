@@ -25,6 +25,7 @@ pub struct OpenMlsIdentityReply {
     pub mls_key_package: KeyPackageBundle,
     pub credential_with_key: CredentialWithKey,
     pub signature_keypair: Arc<SignatureKeyPair>, // neither Clone nor Copy is implemented, bummer. So we wrap it in an Arc.
+    pub ciphersuite: Ciphersuite,
 }
 
 // Implement the message handling for HelloWorldActor
@@ -40,6 +41,7 @@ impl Message<OpenMlsIdentityRequest> for OpenMlsIdentityActor {
             mls_key_package: self.mls_key_package.clone(),
             credential_with_key: self.credential_with_key.clone(),
             signature_keypair: self.signature_keypair.clone(),
+            ciphersuite: self.ciphersuite,
         }
     }
 }
