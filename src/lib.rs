@@ -1,8 +1,6 @@
 pub mod app;
 pub mod cli;
 pub mod config;
-// pub mod identity;
-// pub mod key_package;
 pub mod network;
 pub mod processor;
 pub mod command;

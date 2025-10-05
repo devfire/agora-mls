@@ -6,7 +6,7 @@ use tracing::{debug, error};
 use crate::{
     command::Command,
     network,
-    state_actor::{StateActorReply, StateActor},
+    state_actor::{StateActor, StateActorReply},
 };
 
 pub struct Processor {
@@ -113,6 +113,16 @@ impl Processor {
                                 }
                             }
                         }
+                        // Not a command; send the message to the network manager for broadcasting
+                        else {
+                            debug!("Sending message to network manager for broadcast: {}", line);
+                            // Here we would create a ChatPacket and send it via the network manager
+                            // For now, just log the message
+                            // let packet = ChatPacket::new_message(&identity_handle, &line);
+                            // if let Err(e) = self.network_manager.send_message(packet).await {
+                            //     error!("Failed to send message: {}", e);
+                            // }
+                        }
                     }
                     Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
                         debug!("User initiated exit (Ctrl+C or Ctrl+D)");
@@ -134,27 +144,37 @@ impl Processor {
     ) -> tokio::task::JoinHandle<()> {
         // let identity_handle = self.identity.handle.clone();
         tokio::spawn(async move {
-            let identity_handle = state_actor
-                .ask(Command::Nick { nickname: None })
-                .await
-                .expect("Unable to get chat handle");
-            debug!(
-                "Starting command handler task for user '{}'",
-                identity_handle
-            );
+            // let identity_handle = state_actor
+            //     .ask(Command::Nick { nickname: None })
+            //     .await
+            //     .expect("Unable to get chat handle");
+            // debug!(
+            //     "Starting command handler task for user '{}'",
+            //     identity_handle
+            // );
             while let Some(command) = receiver.recv().await {
                 debug!("Command handler received command: {:?}", command);
 
                 // Forward the command to the state actor and await the reply
-                // match state_actor.ask(command).await {
-                //     Ok(reply) => {
-                //         debug!("State actor replied with: {:?}", reply);
-                //         // Handle the reply as needed
-                //     }
-                //     Err(e) => {
-                //         error!("Failed to send command to state actor: {}", e);
-                //     }
-                // }
+                match state_actor.ask(command).await {
+                    Ok(reply) => {
+                        debug!("State actor replied with: {:?}", reply);
+                        match reply {
+                            StateActorReply::ChatHandle(handle) => {
+                                                        println!("Your current chat handle is: {}", handle);
+                                                    }
+                            StateActorReply::Status(result) => match result {
+                                                        Ok(_) => println!("Command executed successfully."),
+                                                        Err(e) => println!("Command failed with error: {:?}", e),
+                                                    },
+                            StateActorReply::Users(items) => todo!(),
+                            StateActorReply::Channels(items) => todo!(),
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to send command to state actor: {}", e);
+                    }
+                }
                 // The rest of your command handling logic
             }
             // debug!(
@@ -163,4 +183,62 @@ impl Processor {
             // );
         })
     }
+
+    /// Spawn a task to continuously receive UDP multicast messages.
+    pub fn spawn_udp_input_task(
+        &self,
+        state_actor: ActorRef<StateActor>,
+    ) -> tokio::task::JoinHandle<()> {
+        let network_manager = Arc::clone(&self.network_manager);
+
+        tokio::spawn(async move {
+            debug!("Starting UDP input task to receive multicast messages");
+
+            loop {
+                match network_manager.receive_message().await {
+                    Ok(packet) => {
+                        debug!("Received network packet: {:?}", packet);
+
+                        // TODO: Process the packet - forward to state actor or handle appropriately
+                        // This is where you would integrate with state_actor to process incoming messages
+                    }
+                    Err(e) => {
+                        error!("Error receiving network message: {}", e);
+                        // Continue loop to keep receiving despite errors
+                    }
+                }
+            }
+        })
+    }
+
+    // /// Display task for printing messages to console. This task is READ ONLY and does not send messages.
+    // pub fn spawn_message_display_task(
+    //     &self,
+    //     mut receiver: tokio::sync::mpsc::Receiver<PlaintextPayload>,
+    //     chat_id: &str,
+    // ) -> tokio::task::JoinHandle<()> {
+    //     let chat_id = chat_id.to_string();
+
+    //     tokio::spawn(async move {
+    //         debug!("Starting chat processing task for agent '{}'", chat_id);
+    //         while let Some(message) = receiver.recv().await {
+    //             if message.display_name != chat_id {
+    //                 debug!(
+    //                     "Chat processing received message from '{}' with content: '{}'",
+    //                     message.display_name, message.content
+    //                 );
+
+    //                 eprint!("\r\x1b[K");
+    //                 eprintln!(
+    //                     "{} {}: {}",
+    //                     message.timestamp, message.display_name, message.content
+    //                 );
+    //                 eprint!("{} > ", chat_id);
+    //             } else {
+    //                 debug!("Ignoring self-sent message from '{}'", message.display_name);
+    //             }
+    //         }
+    //         debug!("Message display task ending.");
+    //     })
+    // }
 }
