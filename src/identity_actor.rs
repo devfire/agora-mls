@@ -2,13 +2,11 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, Result};
 use ed25519_dalek::{SigningKey, VerifyingKey};
-
-use kameo::Reply;
 use kameo::prelude::*;
 use ssh_key::PrivateKey;
 use zeroize::Zeroizing;
 #[derive(Eq, PartialEq, Debug, Clone, Actor)]
-pub struct MyIdentity {
+pub struct IdentityActor {
     // Our Ed25519 identity (for signatures/verification from the SSH key)
     pub signing_key: SigningKey,     // comes from the SSH private key
     pub verifying_key: VerifyingKey, // VerifyingKey is the public key counterpart to SigningKey
@@ -18,36 +16,39 @@ pub struct MyIdentity {
 }
 
 #[derive(Debug)]
-pub enum IdentityRequest {
-    GetHandle,
-    GetVerifyingKey,
+pub struct IdentityActorMsg {
+    pub handle_update: Option<String>, // If Some, update our handle; if None, just return current identity info
 }
 
 #[derive(Reply, Debug)]
-pub enum IdentityReply {
-    Handle(String),
-    VerifyingKey(VerifyingKey),
+pub struct IdentityReply {
+    pub handle: String,
+    pub verifying_key: VerifyingKey,
 }
 
-impl Message<IdentityRequest> for MyIdentity {
+impl Message<IdentityActorMsg> for IdentityActor {
     // https://docs.page/tqwewe/kameo/core-concepts/replies
     type Reply = IdentityReply;
 
     async fn handle(
         &mut self,
-        msg: IdentityRequest,
+        msg: IdentityActorMsg, // No data needed; just return our identity info
         _ctx: &mut kameo::message::Context<Self, IdentityReply>,
     ) -> Self::Reply {
         // Logic to process the message and generate a reply
+        if let Some(new_handle) = msg.handle_update {
+            self.handle = new_handle;
+        }
+
         // debug!("CommandHandler received command: {:?}", msg);
-        match msg {
-            IdentityRequest::GetHandle => todo!(),
-            IdentityRequest::GetVerifyingKey => todo!(),
+        IdentityReply {
+            handle: self.handle.clone(),
+            verifying_key: self.verifying_key,
         }
     }
 }
 
-impl MyIdentity {
+impl IdentityActor {
     /// Loads an Ed25519 SSH private key from a file and extracts the signing/verifying key pair.
     ///
     /// Handles both encrypted and unencrypted SSH keys. For encrypted keys, securely prompts
@@ -104,7 +105,7 @@ impl MyIdentity {
     pub fn new(key_file_path: &Path, display_name: &str) -> Result<Self> {
         let (signing_key, verifying_key) = Self::load_ssh_ed25519_key(key_file_path)?;
 
-        Ok(MyIdentity {
+        Ok(IdentityActor {
             signing_key,
             verifying_key,
             handle: display_name.to_string(),

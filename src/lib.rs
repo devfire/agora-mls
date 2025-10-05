@@ -1,18 +1,19 @@
 pub mod app;
 pub mod cli;
 pub mod config;
-pub mod identity;
-pub mod key_package;
+// pub mod identity;
+// pub mod key_package;
 pub mod network;
 pub mod processor;
 pub mod command;
-pub mod app_state;
-
+pub mod openmls_actor;
+pub mod state_actor;
+pub mod identity_actor;
 
 // Re-export commonly used items for easier access
 pub use crate::cli::ChatArgs;
 
-pub use crate::key_package::OpenMlsKeyPackage;
+// pub use crate::key_package::OpenMlsIdentity;
 
 // Include the generated protobuf code
 // The build script outputs to src/ directory so rust-analyzer can find it

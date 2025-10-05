@@ -13,10 +13,10 @@ pub struct CommandWrapper {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Join a channel
-    Join {
-        /// Channel name to join
-        #[arg(help = "Name of the channel to join")]
-        channel: String,
+    Invite {
+        /// Username name to invite
+        #[arg(help = "Name of the user to invite")]
+        nick: String,
         /// Optional password
         #[arg(help = "Channel password (if required)")]
         password: Option<String>,
@@ -34,15 +34,20 @@ pub enum Command {
         #[arg(trailing_var_arg = true)]
         message: Vec<String>,
     },
-    /// Change nickname
-    Nick {
-        /// New nickname
-        nickname: String,
+    /// Create a new group
+    Create {
+        /// New group name
+        name: String,
     },
     /// List users in current channel
     Users,
     /// List available channels
     Channels,
+    /// Display or set your nickname
+    Nick {
+        /// New nickname
+        nickname: Option<String>,
+    },
 
     /// Quit the application
     #[command(alias = "q")]
