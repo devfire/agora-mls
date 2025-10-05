@@ -6,7 +6,7 @@ use tracing::debug;
 
 use kameo::prelude::*;
 
-use crate::{command::Command, identity_actor::IdentityActor, openmls_actor::OpenMlsIdentityActor};
+use crate::{command::Command, identity_actor::{IdentityActor, IdentityRequest}, openmls_actor::{OpenMlsIdentityActor, OpenMlsIdentityRequest}};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Channel {
@@ -105,7 +105,7 @@ impl StateActor {
         }
     }
 
-    fn create_mls_group(&self) -> anyhow::Result<()> {
+    async fn create_mls_group(&self, group_name: &str) -> anyhow::Result<()> {
         // Now start a new group ...
         // let mut group = openmls::group::MlsGroup::new(
         //     &mls_key_package.provider,
@@ -127,10 +127,16 @@ impl StateActor {
         //     key_package_bundle
         // );
 
-        // Now start a new group ...
+        let mls_identity = self
+            .mls_identity_actor
+            .ask(OpenMlsIdentityRequest)
+            .await
+            .expect("Failed to get verifying key from IdentityActor.");
+
+        // // Now start a new group ...
         // let mut group = openmls::group::MlsGroup::new(
-        //     mls_identity.mls_key_package.provider,
-        //     &self.mls_key_package,
+        //     &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+        //     &mls_identity.signature_keypair,
         //     &openmls::group::MlsGroupCreateConfig::default(),
         //     credential_with_key,
         // )?;

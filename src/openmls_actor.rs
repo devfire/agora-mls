@@ -1,11 +1,11 @@
 use kameo::prelude::*;
-use openmls::prelude::*;
+use openmls::{prelude::*};
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::OpenMlsRustCrypto;
 
 use crate::identity_actor::{IdentityActor, IdentityRequest};
 
-#[derive(Actor,Debug)]
+#[derive(Actor,Debug, Copy)]
 pub struct OpenMlsIdentityActor {
     // client_identity: Vec<u8>, // Public key loaded from SSH ED25519 format
     pub ciphersuite: Ciphersuite,
@@ -13,6 +13,34 @@ pub struct OpenMlsIdentityActor {
     pub mls_key_package: KeyPackageBundle,
     pub credential_with_key: CredentialWithKey,
     pub signature_keypair: SignatureKeyPair,
+}
+
+
+// Define the message
+pub struct OpenMlsIdentityRequest;
+
+#[derive(Reply, Debug)]
+pub struct OpenMlsIdentityReply {
+    pub mls_key_package: KeyPackageBundle,
+    pub credential_with_key: CredentialWithKey,
+    pub signature_keypair: SignatureKeyPair,
+}
+
+// Implement the message handling for HelloWorldActor
+impl Message<OpenMlsIdentityRequest> for OpenMlsIdentityActor {
+    type Reply = OpenMlsIdentityReply; 
+
+    async fn handle(
+        &mut self,
+        _msg: OpenMlsIdentityRequest, // Destructure the Greet message to get the greeting string
+        _: &mut Context<Self, Self::Reply>, // The message handling context
+    ) -> Self::Reply {
+        OpenMlsIdentityReply {
+            mls_key_package: self.mls_key_package,
+            credential_with_key: self.credential_with_key,
+            signature_keypair: self.signature_keypair,
+        }
+    }
 }
 
 impl OpenMlsIdentityActor {
