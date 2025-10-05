@@ -47,7 +47,7 @@ pub struct StateActor {
 }
 
 #[derive(Reply, Debug)]
-pub enum Reply {
+pub enum StateActorReply {
     Users(Option<Vec<String>>),
     Channels(Option<Vec<String>>),
     Status(Result<(), StateActorError>), // Ok(()) for success, Err(StateActorError) for failure
@@ -55,16 +55,16 @@ pub enum Reply {
 }
 
 // implement Display for Reply
-impl std::fmt::Display for Reply {
+impl std::fmt::Display for StateActorReply {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Reply::Users(Some(users)) => write!(f, "Users: {:?}", users),
-            Reply::Users(None) => write!(f, "No users found"),
-            Reply::Channels(Some(channels)) => write!(f, "Channels: {:?}", channels),
-            Reply::Channels(None) => write!(f, "No channels found"),
-            Reply::Status(Ok(())) => write!(f, "Operation successful"),
-            Reply::Status(Err(e)) => write!(f, "Operation failed: {}", e),
-            Reply::ChatHandle(handle) => write!(f, "{handle}"),
+            StateActorReply::Users(Some(users)) => write!(f, "Users: {:?}", users),
+            StateActorReply::Users(None) => write!(f, "No users found"),
+            StateActorReply::Channels(Some(channels)) => write!(f, "Channels: {:?}", channels),
+            StateActorReply::Channels(None) => write!(f, "No channels found"),
+            StateActorReply::Status(Ok(())) => write!(f, "Operation successful"),
+            StateActorReply::Status(Err(e)) => write!(f, "Operation failed: {}", e),
+            StateActorReply::ChatHandle(handle) => write!(f, "{handle}"),
         }
     }
 }
@@ -81,26 +81,26 @@ impl std::fmt::Display for Reply {
 
 impl Message<Command> for StateActor {
     // https://docs.page/tqwewe/kameo/core-concepts/replies
-    type Reply = Reply;
+    type Reply = StateActorReply;
 
     async fn handle(
         &mut self,
         msg: Command,
-        ctx: &mut kameo::message::Context<Self, Reply>,
+        _ctx: &mut kameo::message::Context<Self, StateActorReply>,
     ) -> Self::Reply {
         // Logic to process the message and generate a reply
         debug!("CommandHandler received command: {:?}", msg);
         match msg {
-            Command::Invite { channel, password } => todo!(),
+            Command::Invite { nick: channel, password } => todo!(),
             Command::Leave { channel } => todo!(),
             Command::Msg { user, message } => todo!(),
             Command::Create { name } => {
                 if let Err(e) = self.create_mls_group(&name).await {
                     error!("Failed to create MLS group '{}': {e}", name);
-                    Reply::Status(Err(StateActorError::ChannelCreationFailed))
+                    StateActorReply::Status(Err(StateActorError::ChannelCreationFailed))
                 } else {
                     debug!("Successfully created MLS group '{}'", name);
-                    Reply::Status(Ok(()))
+                    StateActorReply::Status(Ok(()))
                 }
             }
             Command::Users => todo!(),
@@ -131,7 +131,7 @@ impl Message<Command> for StateActor {
                         })
                         .await
                         .expect("Failed to set identity in IdentityActor.");
-                    Reply::Status(Ok(()))
+                    StateActorReply::Status(Ok(()))
                 } else {
                     let identity = self
                         .identity_actor
@@ -140,7 +140,7 @@ impl Message<Command> for StateActor {
                         })
                         .await
                         .expect("Failed to get identity from IdentityActor.");
-                    Reply::ChatHandle(identity.handle.clone())
+                    StateActorReply::ChatHandle(identity.handle.clone())
                 }
             }
         }
@@ -162,11 +162,7 @@ impl StateActor {
 
     async fn create_mls_group(&mut self, group_name: &str) -> anyhow::Result<()> {
         const GROUP_NAME_EXTENSION_ID: u16 = 13;
-        let mls_identity = self
-            .mls_identity_actor
-            .ask(OpenMlsIdentityRequest)
-            .await
-            .expect("Failed to get verifying key from IdentityActor.");
+        let mls_identity = self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
 
         // 1. Define your custom group name as bytes
         let group_name_bytes = group_name.as_bytes();
@@ -184,8 +180,7 @@ impl StateActor {
 
         let mls_group_create_config = MlsGroupCreateConfig::builder()
             .ciphersuite(mls_identity.ciphersuite)
-            .with_group_context_extensions(extensions)
-            .expect("Expected to build group context extensions")
+            .with_group_context_extensions(extensions)?
             .build();
 
         // Create the group with default configuration

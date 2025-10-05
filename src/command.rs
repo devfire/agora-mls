@@ -14,9 +14,9 @@ pub struct CommandWrapper {
 pub enum Command {
     /// Join a channel
     Invite {
-        /// Channel name to join
-        #[arg(help = "Name of the channel to join")]
-        channel: String,
+        /// Username name to invite
+        #[arg(help = "Name of the user to invite")]
+        nick: String,
         /// Optional password
         #[arg(help = "Channel password (if required)")]
         password: Option<String>,

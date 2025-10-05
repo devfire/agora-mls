@@ -6,7 +6,7 @@ use tracing::{debug, error};
 use crate::{
     command::Command,
     network,
-    state_actor::{Reply, StateActor},
+    state_actor::{StateActorReply, StateActor},
 };
 
 pub struct Processor {
@@ -75,7 +75,7 @@ impl Processor {
                     .await
                     .expect("Unable to get chat handle")
                 {
-                    Reply::ChatHandle(handle) => handle,
+                    StateActorReply::ChatHandle(handle) => handle,
                     _ => panic!("Expected ChatHandle reply"),
                 }
             });
