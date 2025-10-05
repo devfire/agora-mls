@@ -2,17 +2,18 @@ use kameo::prelude::*;
 use openmls::{prelude::*};
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::OpenMlsRustCrypto;
+use std::sync::Arc;
 
 use crate::identity_actor::{IdentityActor, IdentityRequest};
 
-#[derive(Actor,Debug, Copy)]
+#[derive(Actor, Debug, Clone)]
 pub struct OpenMlsIdentityActor {
     // client_identity: Vec<u8>, // Public key loaded from SSH ED25519 format
     pub ciphersuite: Ciphersuite,
     pub signature_algorithm: SignatureScheme,
     pub mls_key_package: KeyPackageBundle,
     pub credential_with_key: CredentialWithKey,
-    pub signature_keypair: SignatureKeyPair,
+    pub signature_keypair: Arc<SignatureKeyPair>,
 }
 
 
@@ -23,7 +24,7 @@ pub struct OpenMlsIdentityRequest;
 pub struct OpenMlsIdentityReply {
     pub mls_key_package: KeyPackageBundle,
     pub credential_with_key: CredentialWithKey,
-    pub signature_keypair: SignatureKeyPair,
+    pub signature_keypair: Arc<SignatureKeyPair>, // neither Clone nor Copy is implemented, bummer. So we wrap it in an Arc.
 }
 
 // Implement the message handling for HelloWorldActor
@@ -36,9 +37,9 @@ impl Message<OpenMlsIdentityRequest> for OpenMlsIdentityActor {
         _: &mut Context<Self, Self::Reply>, // The message handling context
     ) -> Self::Reply {
         OpenMlsIdentityReply {
-            mls_key_package: self.mls_key_package,
-            credential_with_key: self.credential_with_key,
-            signature_keypair: self.signature_keypair,
+            mls_key_package: self.mls_key_package.clone(),
+            credential_with_key: self.credential_with_key.clone(),
+            signature_keypair: self.signature_keypair.clone(),
         }
     }
 }
@@ -96,7 +97,7 @@ impl OpenMlsIdentityActor {
             ciphersuite,
             signature_algorithm: ciphersuite.signature_algorithm(),
             mls_key_package,
-            signature_keypair,
+            signature_keypair: Arc::new(signature_keypair),
             credential_with_key,
         }
     }
