@@ -16,7 +16,9 @@ pub struct IdentityActor {
 }
 
 #[derive(Debug)]
-pub struct IdentityRequest;
+pub struct IdentityActorMsg {
+    pub handle_update: Option<String>, // If Some, update our handle; if None, just return current identity info
+}
 
 #[derive(Reply, Debug)]
 pub struct IdentityReply {
@@ -24,16 +26,20 @@ pub struct IdentityReply {
     pub verifying_key: VerifyingKey,
 }
 
-impl Message<IdentityRequest> for IdentityActor {
+impl Message<IdentityActorMsg> for IdentityActor {
     // https://docs.page/tqwewe/kameo/core-concepts/replies
     type Reply = IdentityReply;
 
     async fn handle(
         &mut self,
-        _msg: IdentityRequest, // No data needed; just return our identity info
+        msg: IdentityActorMsg, // No data needed; just return our identity info
         _ctx: &mut kameo::message::Context<Self, IdentityReply>,
     ) -> Self::Reply {
         // Logic to process the message and generate a reply
+        if let Some(new_handle) = msg.handle_update {
+            self.handle = new_handle;
+        }
+
         // debug!("CommandHandler received command: {:?}", msg);
         IdentityReply {
             handle: self.handle.clone(),

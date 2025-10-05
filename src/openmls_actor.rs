@@ -1,10 +1,10 @@
 use kameo::prelude::*;
-use openmls::{prelude::*};
+use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::OpenMlsRustCrypto;
 use std::sync::Arc;
 
-use crate::identity_actor::{IdentityActor, IdentityRequest};
+use crate::identity_actor::{IdentityActor, IdentityActorMsg};
 
 #[derive(Actor, Debug, Clone)]
 pub struct OpenMlsIdentityActor {
@@ -15,7 +15,6 @@ pub struct OpenMlsIdentityActor {
     pub credential_with_key: CredentialWithKey,
     pub signature_keypair: Arc<SignatureKeyPair>,
 }
-
 
 // Define the message
 pub struct OpenMlsIdentityRequest;
@@ -30,7 +29,7 @@ pub struct OpenMlsIdentityReply {
 
 // Implement the message handling for HelloWorldActor
 impl Message<OpenMlsIdentityRequest> for OpenMlsIdentityActor {
-    type Reply = OpenMlsIdentityReply; 
+    type Reply = OpenMlsIdentityReply;
 
     async fn handle(
         &mut self,
@@ -64,7 +63,9 @@ impl OpenMlsIdentityActor {
         let provider = &OpenMlsRustCrypto::default();
 
         let verifying_key = identity
-            .ask(IdentityRequest)
+            .ask(IdentityActorMsg {
+                handle_update: None,
+            })
             .await
             .expect("Failed to get verifying key from IdentityActor.")
             .verifying_key;

@@ -10,7 +10,7 @@ use openmls::prelude::*;
 
 use crate::{
     command::Command,
-    identity_actor::IdentityActor,
+    identity_actor::{IdentityActor, IdentityActorMsg},
     openmls_actor::{OpenMlsIdentityActor, OpenMlsIdentityRequest},
 };
 
@@ -87,18 +87,25 @@ impl Message<Command> for StateActor {
             Command::Channels => todo!(),
             Command::Quit => todo!(),
             Command::Nick { nickname } => {
-                todo!()
-                //     let identity = self
-                //         .identity_actor
-                //         .ask(crate::identity_actor::IdentityRequest)
-                //         .await
-                //         .expect("Failed to get identity from IdentityActor.");
-                //     if let Some(nick) = nickname {
-                //         identity.handle = nick;
-                //         Reply::Success
-                //     } else {
-                //         Reply::ChatHandle(identity.handle.clone())
-                //     }
+                if let Some(nick) = nickname {
+                    let identity = self
+                        .identity_actor
+                        .tell(IdentityActorMsg {
+                            handle_update: Some(nick),
+                        })
+                        .await
+                        .expect("Failed to set identity in IdentityActor.");
+                    Reply::Success
+                } else {
+                    let identity = self
+                        .identity_actor
+                        .ask(IdentityActorMsg {
+                            handle_update: None,
+                        })
+                        .await
+                        .expect("Failed to get identity from IdentityActor.");
+                    Reply::ChatHandle(identity.handle.clone())
+                }
             }
         }
     }
