@@ -1,7 +1,6 @@
 # Agora MLS
 
-![Build Status](https://github.com/<username>/agora-mls/workflows/CI/badge.svg)
-![License](https://img.shields.io/crates/l/agora-mls.svg)
+![Build Status](https://github.com/devfire/agora-mls/workflows/CI/badge.svg)
 ![Rust Version](https://img.shields.io/badge/rust-2024%20edition-orange.svg)
 
 **A secure, distributed chat application using Messaging Layer Security (MLS) over UDP multicast**
@@ -457,4 +456,4 @@ This project builds upon excellent work from the Rust community:
 
 ---
 
-For more information, questions, or to contribute, visit the [GitHub repository](https://github.com/<username>/agora-mls).
+For more information, questions, or to contribute, visit the [GitHub repository](https://github.com/devfire/agora-mls).
