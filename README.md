@@ -1,6 +1,5 @@
 # Agora MLS
 
-![Build Status](https://github.com/devfire/agora-mls/workflows/CI/badge.svg)
 ![Rust Version](https://img.shields.io/badge/rust-2024%20edition-orange.svg)
 
 **A secure, distributed chat application using Messaging Layer Security (MLS) over UDP multicast**
@@ -444,7 +443,7 @@ This project builds upon excellent work from the Rust community:
 
 ### Q: How do I verify someone's identity?
 
-**A**: Use the `/safety <user>` command to display the safety number, then verify it out-of-band (in person, phone call, etc.) with the other participant.
+**A**: Use the `/safety` command to display the safety number, then verify it out-of-band (in person, phone call, etc.) with the other participant.
 
 ### Q: What happens if someone's key is compromised?
 

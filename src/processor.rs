@@ -179,12 +179,7 @@ impl Processor {
                         break;
                     }
                 }
-                // The rest of your command handling logic
             }
-            // debug!(
-            //     "Command handler task terminated for agent '{}'",
-            //     identity_handle
-            // );
         })
     }
 
