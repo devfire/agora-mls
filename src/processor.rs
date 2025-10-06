@@ -165,7 +165,7 @@ impl Processor {
                                                     }
                             StateActorReply::Status(result) => match result {
                                                         Ok(_) => println!("Command executed successfully."),
-                                                        Err(e) => println!("Command failed with error: {:?}", e),
+                                                        Err(e) => error!("Command processing failed with error: {:?}", e),
                                                     },
                             StateActorReply::Users(items) => todo!(),
                             StateActorReply::Channels(items) => todo!(),
@@ -173,6 +173,7 @@ impl Processor {
                     }
                     Err(e) => {
                         error!("Failed to send command to state actor: {}", e);
+                        break;
                     }
                 }
                 // The rest of your command handling logic
@@ -211,7 +212,7 @@ impl Processor {
         })
     }
 
-    // /// Display task for printing messages to console. This task is READ ONLY and does not send messages.
+    // // /// Display task for printing messages to console. This task is READ ONLY and does not send messages.
     // pub fn spawn_message_display_task(
     //     &self,
     //     mut receiver: tokio::sync::mpsc::Receiver<PlaintextPayload>,
