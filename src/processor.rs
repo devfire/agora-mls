@@ -158,17 +158,20 @@ impl Processor {
                 // Forward the command to the state actor and await the reply
                 match state_actor.ask(command).await {
                     Ok(reply) => {
-                        debug!("State actor replied with: {:?}", reply);
+                        debug!("State actor replied with: {}", reply);
                         match reply {
                             StateActorReply::ChatHandle(handle) => {
-                                                        println!("Your current chat handle is: {}", handle);
-                                                    }
+                                println!("Your current chat handle is: {}", handle);
+                            }
                             StateActorReply::Status(result) => match result {
-                                                        Ok(_) => println!("Command executed successfully."),
-                                                        Err(e) => error!("Command processing failed with error: {:?}", e),
-                                                    },
+                                Ok(_) => println!("Command executed successfully."),
+                                Err(e) => error!("Command processing failed with error: {:?}", e),
+                            },
                             StateActorReply::Users(items) => todo!(),
                             StateActorReply::Channels(items) => todo!(),
+                            StateActorReply::SafetyNumber(safety_number) => {
+                                println!("{}", safety_number);
+                            }
                         }
                     }
                     Err(e) => {

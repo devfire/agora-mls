@@ -5,10 +5,10 @@ use crate::{
     network::{NetworkConfigBuilder, NetworkManager},
     openmls_actor::OpenMlsIdentityActor,
     processor::Processor,
-    safety_number::{SafetyNumber, generate_safety_number},
+    safety_number::generate_safety_number,
     state_actor::StateActor,
 };
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use kameo::prelude::*;
 use std::sync::Arc;
 
@@ -65,23 +65,6 @@ impl App {
         // Start the UDP intake task to listen for incoming messages
         let udp_intake_handle = processor.spawn_udp_input_task(state_actor_ref.clone());
 
-        // First, let's get the verifyingkey from the identity actor
-        let verifying_key = identity_actor_ref
-            .ask(crate::identity_actor::IdentityActorMsg {
-                handle_update: None,
-            })
-            .await
-            .context("Failed to get identity from IdentityActor.")?
-            .verifying_key;
-
-        // Generate the safety number for the user
-        match generate_safety_number(&verifying_key) {
-            Ok(safety_number) => {
-                println!("Your safety number is: {}", safety_number.display_string);
-                println!("Full hex: {}", safety_number.full_hex);
-            }
-            Err(_) => todo!(),
-        }
 
         // Wait for tasks to complete (they run indefinitely)
         // The stdin_input_handle is the only one designed to finish, triggering a shutdown.

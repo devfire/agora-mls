@@ -49,6 +49,9 @@ pub enum Command {
         nickname: Option<String>,
     },
 
+    /// Generate the safety number for the current identity
+    Safety,
+
     /// Quit the application
     #[command(alias = "q")]
     Quit,

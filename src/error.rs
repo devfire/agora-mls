@@ -1,7 +1,59 @@
+use std::net::SocketAddr;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum OpenSSHKeyError {
     #[error("Failed to read SSH key file: {ssh_key_file_path}")]
     MissingSshKeyFile { ssh_key_file_path: String },
+}
+
+#[derive(Error, Debug)]
+pub enum NetworkError {
+    #[error("Network configuration error: {message}")]
+    Configuration { message: String },
+
+    #[error(
+        "Invalid multicast address: {address}. Multicast addresses must be in the range 224.0.0.0/4"
+    )]
+    InvalidMulticastAddress { address: SocketAddr },
+
+    #[error(
+        "Buffer size {size} bytes is outside allowed range. Must be between 1024 and 1048576 bytes"
+    )]
+    InvalidBufferSize { size: usize },
+
+    #[error("Invalid port number: {port}. Must be between 1024 and 65535")]
+    InvalidPort { port: u16 },
+
+    #[error("Missing required field: {field_name}")]
+    MissingRequiredField { field_name: String },
+
+    #[error("IPv6 multicast addresses are not currently supported: {address}")]
+    UnsupportedIpv6 { address: SocketAddr },
+
+    #[error("Network interface error: {interface} - {message}")]
+    InterfaceError { interface: String, message: String },
+}
+
+// Define errors
+#[derive(Error, Debug, Clone)]
+pub enum StateActorError {
+    #[error("User not found")]
+    UserNotFound,
+    #[error("Channel not found")]
+    ChannelNotFound,
+
+    #[error("Channel creation failed")]
+    ChannelCreationFailed,
+
+    #[error("Safety number generation failed")]
+    SafetyNumberGenerationFailed,
+}
+
+#[derive(Error, Debug)]
+pub enum SafetyNumberError {
+    #[error("Public key is empty.")]
+    EmptyPublicKey,
+    #[error("Failed to generate safety number.")]
+    QrCodeGenerationFailed,
 }

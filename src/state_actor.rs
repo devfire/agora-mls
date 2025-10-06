@@ -2,28 +2,18 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use ed25519_dalek::VerifyingKey;
-use thiserror::Error;
 
 use tracing::{debug, error};
 
 use kameo::prelude::*;
 use openmls::prelude::*;
 
-// Define errors
-#[derive(Error, Debug, Clone)]
-pub enum StateActorError {
-    #[error("User not found")]
-    UserNotFound,
-    #[error("Channel not found")]
-    ChannelNotFound,
-
-    #[error("Channel creation failed")]
-    ChannelCreationFailed,
-}
 use crate::{
     command::Command,
+    error::StateActorError,
     identity_actor::{IdentityActor, IdentityActorMsg},
     openmls_actor::{OpenMlsIdentityActor, OpenMlsIdentityRequest},
+    safety_number::{SafetyNumber, generate_safety_number},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,12 +36,13 @@ pub struct StateActor {
     mls_identity_actor: ActorRef<OpenMlsIdentityActor>,
 }
 
-#[derive(Reply, Debug)]
+#[derive(Reply)]
 pub enum StateActorReply {
     Users(Option<Vec<String>>),
     Channels(Option<Vec<String>>),
     Status(Result<(), StateActorError>), // Ok(()) for success, Err(StateActorError) for failure
     ChatHandle(String),
+    SafetyNumber(SafetyNumber),
 }
 
 // implement Display for Reply
@@ -65,6 +56,11 @@ impl std::fmt::Display for StateActorReply {
             StateActorReply::Status(Ok(())) => write!(f, "Operation successful"),
             StateActorReply::Status(Err(e)) => write!(f, "Operation failed: {}", e),
             StateActorReply::ChatHandle(handle) => write!(f, "{handle}"),
+            StateActorReply::SafetyNumber(safety_number) => write!(
+                f,
+                "Safety Number: {}\nFull Hash: {}\nQR Code:\n{}",
+                safety_number.display_string, safety_number.full_hex, safety_number.qrcode
+            ),
         }
     }
 }
@@ -91,7 +87,10 @@ impl Message<Command> for StateActor {
         // Logic to process the message and generate a reply
         debug!("CommandHandler received command: {:?}", msg);
         match msg {
-            Command::Invite { nick: channel, password } => todo!(),
+            Command::Invite {
+                nick: channel,
+                password,
+            } => todo!(),
             Command::Leave { channel } => todo!(),
             Command::Msg { user, message } => todo!(),
             Command::Create { name } => {
@@ -141,6 +140,35 @@ impl Message<Command> for StateActor {
                         .await
                         .expect("Failed to get identity from IdentityActor.");
                     StateActorReply::ChatHandle(identity.handle.clone())
+                }
+            }
+            Command::Safety => {
+                // First, let's get the verifyingkey from the identity actor
+                let verifying_key = match self
+                    .identity_actor
+                    .ask(crate::identity_actor::IdentityActorMsg {
+                        handle_update: None,
+                    })
+                    .await
+                {
+                    Ok(reply) => reply.verifying_key,
+                    Err(e) => {
+                        error!("Failed to get verifying key from IdentityActor: {e}");
+                        return StateActorReply::Status(Err(
+                            StateActorError::SafetyNumberGenerationFailed,
+                        ));
+                    }
+                };
+
+                // Generate the safety number for the user
+                match generate_safety_number(&verifying_key) {
+                    Ok(safety_number) => {
+                        debug!("Your safety number is: {safety_number}");
+                        StateActorReply::SafetyNumber(safety_number)
+                    }
+                    Err(_) => {
+                        StateActorReply::Status(Err(StateActorError::SafetyNumberGenerationFailed))
+                    }
                 }
             }
         }

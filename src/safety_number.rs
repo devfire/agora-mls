@@ -1,7 +1,9 @@
 use ed25519_dalek::VerifyingKey;
+use qrcode::QrCode;
+use qrcode::render::unicode;
 use sha2::{Digest, Sha256};
-use thiserror::Error;
 
+use crate::error::SafetyNumberError;
 
 /// A container for the user's identity fingerprint.
 pub struct SafetyNumber {
@@ -9,20 +11,28 @@ pub struct SafetyNumber {
     pub display_string: String,
     /// The full hash for QR code generation or exact matching.
     pub full_hex: String,
+    /// QR code based on the hash
+    pub qrcode: String,
 }
 
-#[derive(Error, Debug)]
-pub enum SafetyNumberError {
-    #[error("Public key is empty.")]
-    EmptyPublicKey,
-    #[error("Failed to generate safety number.")]
-    GenerationFailed,
+// Implement Display for SafetyNumber for easy printing
+impl std::fmt::Display for SafetyNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Safety Number: {}\nFull Hash: {}\nQR Code:\n{}",
+            self.display_string, self.full_hex, self.qrcode
+        )
+    }
 }
+
 /// Generates a safety number from a user's OpenMLS Credential.
 ///
 /// This function hashes the public key within the credential to create a stable,
 /// verifiable fingerprint for out-of-band authentication.
-pub fn generate_safety_number(public_key: &VerifyingKey) -> Result<SafetyNumber, SafetyNumberError> {
+pub fn generate_safety_number(
+    public_key: &VerifyingKey,
+) -> Result<SafetyNumber, SafetyNumberError> {
     // Convert the public key to bytes
     let public_key_bytes = public_key.to_bytes();
 
@@ -30,7 +40,7 @@ pub fn generate_safety_number(public_key: &VerifyingKey) -> Result<SafetyNumber,
         return Err(SafetyNumberError::EmptyPublicKey);
     }
 
-    // 2. Hash the public key using SHA-256.
+    // Hash the public key using SHA-256.
     let mut hasher = Sha256::new();
     hasher.update(public_key_bytes);
     let hash_result = hasher.finalize();
@@ -54,8 +64,18 @@ pub fn generate_safety_number(public_key: &VerifyingKey) -> Result<SafetyNumber,
     // Format 2: A full hex string for QR codes.
     let full_hex = hex::encode(hash_result);
 
+    let code = QrCode::new(&full_hex).map_err(|_| SafetyNumberError::QrCodeGenerationFailed)?;
+
+    // Render to a string for console output
+    let image = code
+        .render::<unicode::Dense1x2>()
+        .dark_color(unicode::Dense1x2::Light)
+        .light_color(unicode::Dense1x2::Dark)
+        .build();
+
     Ok(SafetyNumber {
         display_string,
         full_hex,
+        qrcode: image,
     })
 }
