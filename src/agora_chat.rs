@@ -18,7 +18,7 @@ pub mod chat_packet {
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum MessageType {
         #[prost(message, tag = "5")]
-        ApplicationMessage(super::ApplicationMessage),
+        ApplicationMessage(super::PlaintextPayload),
         #[prost(message, tag = "6")]
         MlsMessage(super::MlsMessage),
         #[prost(message, tag = "7")]
@@ -39,9 +39,16 @@ pub mod chat_packet {
 }
 /// Application-level chat messages (encrypted by MLS)
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ApplicationMessage {
+pub struct PlaintextPayload {
+    /// Human readable name
     #[prost(string, tag = "1")]
+    pub display_name: ::prost::alloc::string::String,
+    /// Actual chat message content (Unicode text)
+    #[prost(string, tag = "2")]
     pub content: ::prost::alloc::string::String,
+    /// Unix nanosecond timestamp (allows message ordering despite network delays)
+    #[prost(uint64, tag = "3")]
+    pub timestamp: u64,
 }
 /// MLS protocol messages
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

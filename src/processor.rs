@@ -1,3 +1,4 @@
+use clap::builder::Str;
 use kameo::prelude::ActorRef;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use std::sync::Arc;
@@ -210,34 +211,42 @@ impl Processor {
         })
     }
 
-    // // /// Display task for printing messages to console. This task is READ ONLY and does not send messages.
-    // pub fn spawn_message_display_task(
-    //     &self,
-    //     mut receiver: tokio::sync::mpsc::Receiver<PlaintextPayload>,
-    //     chat_id: &str,
-    // ) -> tokio::task::JoinHandle<()> {
-    //     let chat_id = chat_id.to_string();
+    /// Display task for printing messages to console. This task is READ ONLY and does not send messages.
+    pub fn spawn_message_display_task(
+        &self,
+        state_actor: ActorRef<StateActor>,
+        mut receiver: tokio::sync::mpsc::Receiver<crate::agora_chat::PlaintextPayload>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            debug!("Starting message display task.");
+            let chat_id = match state_actor.ask(Command::Nick { nickname: None }).await {
+                Ok(StateActorReply::ChatHandle(handle)) => handle,
+                Err(e) => {
+                    error!("Unable to get chat handle: {}", e);
+                    return;
+                }
+                _ => {
+                    unreachable!("Expected ChatHandle reply")
+                }
+            };
+            while let Some(message) = receiver.recv().await {
+                if message.display_name != chat_id {
+                    debug!(
+                        "Chat processing received message from '{}' with content: '{}'",
+                        message.display_name, message.content
+                    );
 
-    //     tokio::spawn(async move {
-    //         debug!("Starting chat processing task for agent '{}'", chat_id);
-    //         while let Some(message) = receiver.recv().await {
-    //             if message.display_name != chat_id {
-    //                 debug!(
-    //                     "Chat processing received message from '{}' with content: '{}'",
-    //                     message.display_name, message.content
-    //                 );
-
-    //                 eprint!("\r\x1b[K");
-    //                 eprintln!(
-    //                     "{} {}: {}",
-    //                     message.timestamp, message.display_name, message.content
-    //                 );
-    //                 eprint!("{} > ", chat_id);
-    //             } else {
-    //                 debug!("Ignoring self-sent message from '{}'", message.display_name);
-    //             }
-    //         }
-    //         debug!("Message display task ending.");
-    //     })
-    // }
+                    eprint!("\r\x1b[K");
+                    eprintln!(
+                        "{} {}: {}",
+                        message.timestamp, message.display_name, message.content
+                    );
+                    eprint!("{} > ", chat_id);
+                } else {
+                    debug!("Ignoring self-sent message from '{}'", message.display_name);
+                }
+            }
+            debug!("Message display task ending.");
+        })
+    }
 }

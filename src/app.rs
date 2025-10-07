@@ -1,14 +1,7 @@
 use crate::{
-    command::Command,
-    config::Config,
-    identity_actor::IdentityActor,
-    network::{NetworkConfigBuilder, NetworkManager},
-    openmls_actor::OpenMlsIdentityActor,
-    processor::Processor,
-    safety_number::generate_safety_number,
-    state_actor::StateActor,
+    agora_chat::PlaintextPayload, command::Command, config::Config, identity_actor::IdentityActor, network::{NetworkConfigBuilder, NetworkManager}, openmls_actor::OpenMlsIdentityActor, processor::Processor, safety_number::generate_safety_number, state_actor::StateActor
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use kameo::prelude::*;
 use std::sync::Arc;
 
@@ -40,6 +33,10 @@ impl App {
 
         // Create a channel for commands from stdin to the command handler
         let (command_sender, command_receiver) = tokio::sync::mpsc::channel::<Command>(100);
+
+        // Create a channel for displaying messages to the user
+        let (display_sender, display_receiver) = tokio::sync::mpsc::channel::<PlaintextPayload>(100);
+
         let identity_actor_ref = IdentityActor::spawn(IdentityActor::new(
             &self.config.key_file,
             &self.config.chat_id,
@@ -65,6 +62,8 @@ impl App {
         // Start the UDP intake task to listen for incoming messages
         let udp_intake_handle = processor.spawn_udp_input_task(state_actor_ref.clone());
 
+        // Start the display task to show messages to the user
+        let display_handle = processor.spawn_message_display_task(state_actor_ref.clone(),display_receiver);
 
         // Wait for tasks to complete (they run indefinitely)
         // The stdin_input_handle is the only one designed to finish, triggering a shutdown.

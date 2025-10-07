@@ -11,7 +11,6 @@ message ChatPacket {
   bytes group_id = 4;
   
   oneof message_type {
-    ApplicationMessage application_message = 5;
     MlsMessage mls_message = 6;
     KeyPackageMessage key_package = 7;
     GroupAnnouncement group_announcement = 8;
@@ -24,8 +23,15 @@ message ChatPacket {
 }
 
 // Application-level chat messages (encrypted by MLS)
-message ApplicationMessage {
-  string content = 1;
+message PlaintextPayload {
+   // Human readable name
+  string display_name = 1;
+
+  // Actual chat message content (Unicode text)
+  string content = 2;
+
+  // Unix nanosecond timestamp (allows message ordering despite network delays)
+  uint64 timestamp = 3;
 }
 
 // MLS protocol messages
