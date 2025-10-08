@@ -13,8 +13,6 @@ pub mod safety_number;
 // Re-export commonly used items for easier access
 pub use crate::cli::ChatArgs;
 
-// pub use crate::key_package::OpenMlsIdentity;
-
 // Include the generated protobuf code
 // The build script outputs to src/ directory so rust-analyzer can find it
 #[path = "agora_chat.rs"]

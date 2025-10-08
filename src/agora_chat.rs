@@ -10,15 +10,13 @@ pub struct ChatPacket {
     pub sender_id: ::prost::alloc::string::String,
     #[prost(bytes = "vec", tag = "4")]
     pub group_id: ::prost::alloc::vec::Vec<u8>,
-    #[prost(oneof = "chat_packet::MessageType", tags = "5, 6, 7, 8, 9, 10, 11, 12, 13")]
+    #[prost(oneof = "chat_packet::MessageType", tags = "6, 7, 8, 9, 10, 11, 12, 13")]
     pub message_type: ::core::option::Option<chat_packet::MessageType>,
 }
 /// Nested message and enum types in `ChatPacket`.
 pub mod chat_packet {
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum MessageType {
-        #[prost(message, tag = "5")]
-        ApplicationMessage(super::PlaintextPayload),
         #[prost(message, tag = "6")]
         MlsMessage(super::MlsMessage),
         #[prost(message, tag = "7")]

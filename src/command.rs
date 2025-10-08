@@ -41,8 +41,13 @@ pub enum Command {
     },
     /// List users in current channel
     Users,
-    /// List available channels
-    Channels,
+
+    /// List available groups
+    Groups,
+
+    /// Display information about current group
+    Group,
+
     /// Display or set your nickname
     Nick {
         /// New nickname

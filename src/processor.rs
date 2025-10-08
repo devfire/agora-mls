@@ -115,15 +115,71 @@ impl Processor {
                             }
                         }
                         // Not a command; send the message to the network manager for broadcasting
-                        else {
-                            debug!("Sending message to network manager for broadcast: {}", line);
-                            // Here we would create a ChatPacket and send it via the network manager
-                            // For now, just log the message
-                            // let packet = ChatPacket::new_message(&identity_handle, &line);
-                            // if let Err(e) = self.network_manager.send_message(packet).await {
-                            //     error!("Failed to send message: {}", e);
-                            // }
-                        }
+                        // else {
+                        //     debug!("Sending message to network manager for broadcast: {}", line);
+                        //     // Steps are:
+                        //     // 1. Get the current active group from the state actor
+                        //     // 2. Construct a PlaintextPayload message
+                        //     // 3. Encrypt it using the MLS group
+                        //     // 4. Send the encrypted message via the network manager
+                        //     // 5. The network manager handles the actual UDP multicast sending
+                        //     // let result = rt.block_on(async {
+                        //     //     // 1. Get the current active group from the state actor
+                        //     //     let active_group = match state_actor
+                        //     //         .ask(Command::Msg {
+                        //     //             user: String::new(),
+                        //     //             message: String::new(),
+                        //     //         })
+                        //     //         .await
+                        //     //     {
+                        //     //         Ok(StateActorReply::Status(Ok(()))) => {
+                        //     //             // Placeholder: Replace with actual method to get active group
+                        //     //             // self.state_actor.get_active_group().await
+                        //     //             todo!("Implement getting the active group from state actor")
+                        //     //         }
+                        //     //         Ok(StateActorReply::Status(Err(e))) => {
+                        //     //             error!("Failed to get active group: {:?}", e);
+                        //     //             return Err(e);
+                        //     //         }
+                        //     //         Err(e) => {
+                        //     //             error!("Failed to communicate with state actor: {}", e);
+                        //     //             return Err(e);
+                        //     //         }
+                        //     //         _ => {
+                        //     //             error!("Unexpected reply when getting active group");
+                        //     //             return Err(StateActorError::ChannelNotFound);
+                        //     //         }
+                        //     //     };
+
+                        //     //     // 2. Construct a PlaintextPayload message
+                        //     //     let payload = crate::agora_chat::PlaintextPayload {
+                        //     //         display_name: identity_handle.clone(),
+                        //     //         content: line.clone(),
+                        //     //         timestamp: chrono::Utc::now().timestamp_nanos() as u64,
+                        //     //     };
+
+                        //     //     // 3. Encrypt it using the MLS group
+                        //     //     let encrypted_message = match active_group.encrypt_message(&payload) {
+                        //     //         Ok(msg) => msg,
+                        //     //         Err(e) => {
+                        //     //             error!("Failed to encrypt message: {}", e);
+                        //     //             return Err(StateActorError::MessageEncryptionFailed);
+                        //     //         }
+                        //     //     };
+
+                        //     //     // 4. Send the encrypted message via the network manager
+                        //     //     match network_manager.send_message(encrypted_message).await {
+                        //     //         Ok(_) => {
+                        //     //             debug!("Message broadcast successfully.");
+                        //     //             Ok(())
+                        //     //         }
+                        //     //         Err(e) => {
+                        //     //             error!("Failed to send message via network manager: {}", e);
+                        //     //             Err(StateActorError::NetworkError)
+                        //     //         }
+                        //         }
+                        //     });
+                        // }
                     }
                     Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
                         debug!("User initiated exit (Ctrl+C or Ctrl+D)");

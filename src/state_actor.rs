@@ -16,22 +16,22 @@ use crate::{
     safety_number::{SafetyNumber, generate_safety_number},
 };
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Channel {
-    pub channel_id: String,
-    pub channel_name: String,
-}
-impl std::fmt::Display for Channel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} ({})", self.channel_name, self.channel_id)
-    }
-}
+// #[derive(Debug, Clone, PartialEq)]
+// pub struct Group {
+//     pub id: String,
+//     pub name: String,
+// }
+// impl std::fmt::Display for Group {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         write!(f, "{} ({})", self.name, self.id)
+//     }
+// }
 // Define the state actor
 /// This actor holds the current state of the application.
 #[derive(Actor)]
 pub struct StateActor {
     users: Vec<VerifyingKey>,
-    membership: HashMap<VerifyingKey, Vec<Channel>>, // Maps handle to channels
+    // membership: HashMap<VerifyingKey, Vec<Group>>, // Maps handle to channels
     identity_actor: ActorRef<IdentityActor>,
     mls_identity_actor: ActorRef<OpenMlsIdentityActor>,
 }
@@ -103,7 +103,7 @@ impl Message<Command> for StateActor {
                 }
             }
             Command::Users => todo!(),
-            Command::Channels => {
+            Command::Groups => {
                 todo!()
                 // if self.users.is_empty() {
                 //     Reply::Channels(None)
@@ -171,6 +171,7 @@ impl Message<Command> for StateActor {
                     }
                 }
             }
+            Command::Group => todo!(),
         }
     }
 }
@@ -182,7 +183,7 @@ impl StateActor {
     ) -> Self {
         Self {
             users: vec![],
-            membership: HashMap::new(),
+            // membership: HashMap::new(),
             identity_actor,
             mls_identity_actor,
         }
