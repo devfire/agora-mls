@@ -1,7 +1,7 @@
 use crate::{
-    agora_chat::PlaintextPayload, command::Command, config::Config, identity_actor::IdentityActor, network::{NetworkConfigBuilder, NetworkManager}, openmls_actor::OpenMlsIdentityActor, processor::Processor, safety_number::generate_safety_number, state_actor::StateActor
+    agora_chat::PlaintextPayload, command::Command, config::Config, identity_actor::IdentityActor, network::{NetworkConfigBuilder, NetworkManager}, openmls_actor::OpenMlsIdentityActor, processor::Processor, state_actor::StateActor
 };
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
 use kameo::prelude::*;
 use std::sync::Arc;
 

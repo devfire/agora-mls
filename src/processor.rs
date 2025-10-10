@@ -1,4 +1,3 @@
-use clap::builder::Str;
 use kameo::prelude::ActorRef;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use std::sync::Arc;
@@ -66,22 +65,8 @@ impl Processor {
                 }
             };
 
-            // The problem here is that spawn_blocking runs on a separate thread pool that doesn't have access to the async runtime,
-            // so we can't use .await directly inside it.
-            // Therefore, tokio::runtime::Handle::current().block_on() is to bridge the gap between the blocking and async contexts.
-            let rt = tokio::runtime::Handle::current();
-            let identity_handle = rt.block_on(async {
-                match state_actor
-                    .ask(Command::Nick { nickname: None })
-                    .await
-                    .expect("Unable to get chat handle")
-                {
-                    StateActorReply::ChatHandle(handle) => handle,
-                    _ => panic!("Expected ChatHandle reply"),
-                }
-            });
             loop {
-                let readline = rustyline_editor.readline(&format!("{} > ", identity_handle));
+                let readline = rustyline_editor.readline(&format!(" > "));
 
                 match readline {
                     Ok(line) => {

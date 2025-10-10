@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 
 use anyhow::Context;
 use ed25519_dalek::VerifyingKey;
