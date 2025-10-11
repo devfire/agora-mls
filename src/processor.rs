@@ -31,7 +31,6 @@ impl Processor {
     /// Spawn a task to handle user input from stdin.
     pub fn spawn_stdin_input_task(
         &self,
-        state_actor: ActorRef<StateActor>,
         sender: tokio::sync::mpsc::Sender<Command>,
     ) -> tokio::task::JoinHandle<()> {
         // get the chat handle from the state actor
@@ -99,72 +98,6 @@ impl Processor {
                                 }
                             }
                         }
-                        // Not a command; send the message to the network manager for broadcasting
-                        // else {
-                        //     debug!("Sending message to network manager for broadcast: {}", line);
-                        //     // Steps are:
-                        //     // 1. Get the current active group from the state actor
-                        //     // 2. Construct a PlaintextPayload message
-                        //     // 3. Encrypt it using the MLS group
-                        //     // 4. Send the encrypted message via the network manager
-                        //     // 5. The network manager handles the actual UDP multicast sending
-                        //     // let result = rt.block_on(async {
-                        //     //     // 1. Get the current active group from the state actor
-                        //     //     let active_group = match state_actor
-                        //     //         .ask(Command::Msg {
-                        //     //             user: String::new(),
-                        //     //             message: String::new(),
-                        //     //         })
-                        //     //         .await
-                        //     //     {
-                        //     //         Ok(StateActorReply::Status(Ok(()))) => {
-                        //     //             // Placeholder: Replace with actual method to get active group
-                        //     //             // self.state_actor.get_active_group().await
-                        //     //             todo!("Implement getting the active group from state actor")
-                        //     //         }
-                        //     //         Ok(StateActorReply::Status(Err(e))) => {
-                        //     //             error!("Failed to get active group: {:?}", e);
-                        //     //             return Err(e);
-                        //     //         }
-                        //     //         Err(e) => {
-                        //     //             error!("Failed to communicate with state actor: {}", e);
-                        //     //             return Err(e);
-                        //     //         }
-                        //     //         _ => {
-                        //     //             error!("Unexpected reply when getting active group");
-                        //     //             return Err(StateActorError::ChannelNotFound);
-                        //     //         }
-                        //     //     };
-
-                        //     //     // 2. Construct a PlaintextPayload message
-                        //     //     let payload = crate::agora_chat::PlaintextPayload {
-                        //     //         display_name: identity_handle.clone(),
-                        //     //         content: line.clone(),
-                        //     //         timestamp: chrono::Utc::now().timestamp_nanos() as u64,
-                        //     //     };
-
-                        //     //     // 3. Encrypt it using the MLS group
-                        //     //     let encrypted_message = match active_group.encrypt_message(&payload) {
-                        //     //         Ok(msg) => msg,
-                        //     //         Err(e) => {
-                        //     //             error!("Failed to encrypt message: {}", e);
-                        //     //             return Err(StateActorError::MessageEncryptionFailed);
-                        //     //         }
-                        //     //     };
-
-                        //     //     // 4. Send the encrypted message via the network manager
-                        //     //     match network_manager.send_message(encrypted_message).await {
-                        //     //         Ok(_) => {
-                        //     //             debug!("Message broadcast successfully.");
-                        //     //             Ok(())
-                        //     //         }
-                        //     //         Err(e) => {
-                        //     //             error!("Failed to send message via network manager: {}", e);
-                        //     //             Err(StateActorError::NetworkError)
-                        //     //         }
-                        //         }
-                        //     });
-                        // }
                     }
                     Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
                         debug!("User initiated exit (Ctrl+C or Ctrl+D)");
@@ -179,6 +112,21 @@ impl Processor {
         })
     }
 
+    /// Spawn a task to handle messages from stdin and forward them to the network manager.
+    pub fn spawn_message_handler_task(
+        &self,
+        state_actor: ActorRef<StateActor>,
+        mut receiver: tokio::sync::mpsc::Receiver<String>,
+    ) -> tokio::task::JoinHandle<()> {
+        // let identity_handle = self.identity.handle.clone();
+        tokio::spawn(async move {
+            debug!("Starting message handler task.");
+            while let Some(message) = receiver.recv().await {
+                debug!("Message handler received: {:?}", message);
+            }
+        })
+    }
+
     pub fn spawn_command_handler_task(
         &self,
         state_actor: ActorRef<StateActor>,
@@ -186,14 +134,7 @@ impl Processor {
     ) -> tokio::task::JoinHandle<()> {
         // let identity_handle = self.identity.handle.clone();
         tokio::spawn(async move {
-            // let identity_handle = state_actor
-            //     .ask(Command::Nick { nickname: None })
-            //     .await
-            //     .expect("Unable to get chat handle");
-            // debug!(
-            //     "Starting command handler task for user '{}'",
-            //     identity_handle
-            // );
+            debug!("Starting command handler task.");
             while let Some(command) = receiver.recv().await {
                 debug!("Command handler received command: {:?}", command);
 
@@ -209,11 +150,11 @@ impl Processor {
                                 Ok(_) => println!("Command executed successfully."),
                                 Err(e) => error!("Command processing failed with error: {:?}", e),
                             },
-                            StateActorReply::Users(items) => todo!(),
-                            StateActorReply::Channels(items) => todo!(),
+                            StateActorReply::Groups(items) => todo!(),
                             StateActorReply::SafetyNumber(safety_number) => {
                                 println!("{}", safety_number);
                             }
+                            StateActorReply::ActiveGroup(mls_group) => todo!(),
                         }
                     }
                     Err(e) => {

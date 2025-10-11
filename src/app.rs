@@ -37,6 +37,10 @@ impl App {
         // Create a channel for displaying messages to the user
         let (display_sender, display_receiver) = tokio::sync::mpsc::channel::<PlaintextPayload>(100);
 
+        // Create a channel for sending messages to the message handler
+        let (message_sender, message_receiver) = tokio::sync::mpsc::channel::<String>(100);
+
+
         let identity_actor_ref = IdentityActor::spawn(IdentityActor::new(
             &self.config.key_file,
             &self.config.chat_id,
@@ -56,7 +60,7 @@ impl App {
         // Note the distinct lack of .await here - we want to spawn these tasks and let them run concurrently
         // rather than waiting for each to complete before starting the next.
         let stdin_handle =
-            processor.spawn_stdin_input_task(state_actor_ref.clone(), command_sender);
+            processor.spawn_stdin_input_task( command_sender);
         let command_handle =
             processor.spawn_command_handler_task(state_actor_ref.clone(), command_receiver);
         // Start the UDP intake task to listen for incoming messages

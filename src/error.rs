@@ -40,6 +40,10 @@ pub enum NetworkError {
 pub enum StateActorError {
     #[error("User not found")]
     UserNotFound,
+
+    #[error("Group not found")]
+    GroupNotFound,
+
     #[error("Channel not found")]
     ChannelNotFound,
 
@@ -48,6 +52,9 @@ pub enum StateActorError {
 
     #[error("Safety number generation failed")]
     SafetyNumberGenerationFailed,
+
+    #[error("No active group")]
+    NoActiveGroup,
 }
 
 #[derive(Error, Debug)]

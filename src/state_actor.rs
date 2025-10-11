@@ -1,6 +1,6 @@
+use std::collections::HashMap;
 
 use anyhow::Context;
-use ed25519_dalek::VerifyingKey;
 
 use tracing::{debug, error};
 
@@ -15,43 +15,30 @@ use crate::{
     safety_number::{SafetyNumber, generate_safety_number},
 };
 
-// #[derive(Debug, Clone, PartialEq)]
-// pub struct Group {
-//     pub id: String,
-//     pub name: String,
-// }
-// impl std::fmt::Display for Group {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         write!(f, "{} ({})", self.name, self.id)
-//     }
-// }
-// Define the state actor
-/// This actor holds the current state of the application.
 #[derive(Actor)]
 pub struct StateActor {
-    users: Vec<VerifyingKey>,
     // membership: HashMap<VerifyingKey, Vec<Group>>, // Maps handle to channels
+    groups: HashMap<String, MlsGroup>, // Maps group name to MlsGroup
+    active_group: Option<String>,      // Currently active group name, if any
     identity_actor: ActorRef<IdentityActor>,
     mls_identity_actor: ActorRef<OpenMlsIdentityActor>,
 }
 
 #[derive(Reply)]
 pub enum StateActorReply {
-    Users(Option<Vec<String>>),
-    Channels(Option<Vec<String>>),
+    Groups(Option<Vec<String>>),         // List of group names, if any
     Status(Result<(), StateActorError>), // Ok(()) for success, Err(StateActorError) for failure
     ChatHandle(String),
     SafetyNumber(SafetyNumber),
+    ActiveGroup(Option<String>), // Currently active group, if any
 }
 
 // implement Display for Reply
 impl std::fmt::Display for StateActorReply {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StateActorReply::Users(Some(users)) => write!(f, "Users: {:?}", users),
-            StateActorReply::Users(None) => write!(f, "No users found"),
-            StateActorReply::Channels(Some(channels)) => write!(f, "Channels: {:?}", channels),
-            StateActorReply::Channels(None) => write!(f, "No channels found"),
+            StateActorReply::Groups(Some(channels)) => write!(f, "Channels: {:?}", channels),
+            StateActorReply::Groups(None) => write!(f, "No channels found"),
             StateActorReply::Status(Ok(())) => write!(f, "Operation successful"),
             StateActorReply::Status(Err(e)) => write!(f, "Operation failed: {}", e),
             StateActorReply::ChatHandle(handle) => write!(f, "{handle}"),
@@ -60,19 +47,11 @@ impl std::fmt::Display for StateActorReply {
                 "Safety Number: {}\nFull Hash: {}\nQR Code:\n{}",
                 safety_number.display_string, safety_number.full_hex, safety_number.qrcode
             ),
+            StateActorReply::ActiveGroup(Some(mls_group)) => write!(f, "Active group tbd"),
+            StateActorReply::ActiveGroup(None) => write!(f, "No active group."),
         }
     }
 }
-
-// #[derive(Debug)]
-// pub enum Request {
-//     OriginalCommand(Command), // pass the original command for processing
-//     GetUsers(String),         // get all the users for the given channel
-//     GetChannels,              // get all the channels
-//     QuitChannel(String),      // quit the given channel
-//     CreateChannel(String),    // join the given channel with optional password
-//     ChatHandle,               // get my chat handle
-// }
 
 impl Message<Command> for StateActor {
     // https://docs.page/tqwewe/kameo/core-concepts/replies
@@ -101,26 +80,9 @@ impl Message<Command> for StateActor {
                     StateActorReply::Status(Ok(()))
                 }
             }
-            Command::Users => todo!(),
-            Command::Groups => {
-                todo!()
-                // if self.users.is_empty() {
-                //     Reply::Channels(None)
-                // } else {
-                //     let channel_list: Vec<String> = self
-                //         .users
-                //         .iter()
-                //         .map(|vk| vk.to_bytes())
-                //         .filter_map(|bytes| self.group_names.get(&bytes).cloned())
-                //         .collect();
-                //     if channel_list.is_empty() {
-                //         Reply::Channels(None)
-                //     } else {
-                //         Reply::Channels(Some(channel_list))
-                //     }
-                // }
-            }
-            Command::Quit => todo!(),
+            Command::Users => StateActorReply::Status(Ok(())),
+            Command::Groups => StateActorReply::Status(Ok(())),
+            Command::Quit => StateActorReply::Status(Ok(())),
             Command::Nick { nickname } => {
                 if let Some(nick) = nickname {
                     self.identity_actor
@@ -170,7 +132,25 @@ impl Message<Command> for StateActor {
                     }
                 }
             }
-            Command::Group => todo!(),
+            Command::Group { name: group_name } => {
+                if let Some(name) = group_name {
+                    // User wants to set the active group
+                    if self.groups.contains_key(&name) {
+                        self.active_group = Some(name);
+                        StateActorReply::Status(Ok(()))
+                    } else {
+                        StateActorReply::Status(Err(StateActorError::GroupNotFound))
+                    }
+                } else {
+                    // User wants to get the current active group
+                    if let Some(active_name) = &self.active_group {
+                        StateActorReply::ActiveGroup(Some(active_name.clone()))
+                    } else {
+                        // This should not happen; active_group should always be in groups
+                        StateActorReply::ActiveGroup(None)
+                    }
+                }
+            }
         }
     }
 }
@@ -181,8 +161,8 @@ impl StateActor {
         mls_identity_actor: ActorRef<OpenMlsIdentityActor>,
     ) -> Self {
         Self {
-            users: vec![],
-            // membership: HashMap::new(),
+            groups: HashMap::new(),
+            active_group: None,
             identity_actor,
             mls_identity_actor,
         }
@@ -218,6 +198,12 @@ impl StateActor {
             &mls_group_create_config,
             mls_identity.credential_with_key,
         )?;
+
+        // Add the group to the HashMap
+        self.groups.insert(group_name.to_owned(), group);
+
+        // Set the active group appropriately
+        self.active_group = Some(group_name.to_owned());
 
         Ok(())
     }

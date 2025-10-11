@@ -45,8 +45,11 @@ pub enum Command {
     /// List available groups
     Groups,
 
-    /// Display information about current group
-    Group,
+    /// Display information about current active group or set active group
+    Group {
+        /// Set group to active
+        name: Option<String>,
+    },
 
     /// Display or set your nickname
     Nick {
