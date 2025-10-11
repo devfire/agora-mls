@@ -8,6 +8,7 @@ use kameo::prelude::*;
 use openmls::prelude::*;
 
 use crate::{
+    agora_chat::{ChatPacket, PlaintextPayload},
     command::Command,
     error::StateActorError,
     identity_actor::{IdentityActor, IdentityActorMsg},
@@ -22,6 +23,13 @@ pub struct StateActor {
     active_group: Option<String>,      // Currently active group name, if any
     identity_actor: ActorRef<IdentityActor>,
     mls_identity_actor: ActorRef<OpenMlsIdentityActor>,
+}
+
+#[derive(Debug)]
+pub enum StateActorMessage {
+    Command(Command),
+    Encrypt(String),
+    Decrypt(ChatPacket),
 }
 
 #[derive(Reply)]
@@ -53,104 +61,110 @@ impl std::fmt::Display for StateActorReply {
     }
 }
 
-impl Message<Command> for StateActor {
+impl Message<StateActorMessage> for StateActor {
     // https://docs.page/tqwewe/kameo/core-concepts/replies
     type Reply = StateActorReply;
 
     async fn handle(
         &mut self,
-        msg: Command,
+        msg: StateActorMessage,
         _ctx: &mut kameo::message::Context<Self, StateActorReply>,
     ) -> Self::Reply {
         // Logic to process the message and generate a reply
-        debug!("CommandHandler received command: {:?}", msg);
+        debug!("StateActor received StateActorMessage: {:?}", msg);
         match msg {
-            Command::Invite {
-                nick: channel,
-                password,
-            } => todo!(),
-            Command::Leave { channel } => todo!(),
-            Command::Msg { user, message } => todo!(),
-            Command::Create { name } => {
-                if let Err(e) = self.create_mls_group(&name).await {
-                    error!("Failed to create MLS group '{}': {e}", name);
-                    StateActorReply::Status(Err(StateActorError::ChannelCreationFailed))
-                } else {
-                    debug!("Successfully created MLS group '{}'", name);
-                    StateActorReply::Status(Ok(()))
-                }
-            }
-            Command::Users => StateActorReply::Status(Ok(())),
-            Command::Groups => StateActorReply::Status(Ok(())),
-            Command::Quit => StateActorReply::Status(Ok(())),
-            Command::Nick { nickname } => {
-                if let Some(nick) = nickname {
-                    self.identity_actor
-                        .tell(IdentityActorMsg {
-                            handle_update: Some(nick),
-                        })
-                        .await
-                        .expect("Failed to set identity in IdentityActor.");
-                    StateActorReply::Status(Ok(()))
-                } else {
-                    let identity = self
-                        .identity_actor
-                        .ask(IdentityActorMsg {
-                            handle_update: None,
-                        })
-                        .await
-                        .expect("Failed to get identity from IdentityActor.");
-                    StateActorReply::ChatHandle(identity.handle.clone())
-                }
-            }
-            Command::Safety => {
-                // First, let's get the verifyingkey from the identity actor
-                let verifying_key = match self
-                    .identity_actor
-                    .ask(crate::identity_actor::IdentityActorMsg {
-                        handle_update: None,
-                    })
-                    .await
-                {
-                    Ok(reply) => reply.verifying_key,
-                    Err(e) => {
-                        error!("Failed to get verifying key from IdentityActor: {e}");
-                        return StateActorReply::Status(Err(
-                            StateActorError::SafetyNumberGenerationFailed,
-                        ));
+            StateActorMessage::Command(command) => {
+                match command {
+                    Command::Invite {
+                        nick: channel,
+                        password,
+                    } => todo!(),
+                    Command::Leave { channel } => todo!(),
+                    Command::Msg { user, message } => todo!(),
+                    Command::Create { name } => {
+                        if let Err(e) = self.create_mls_group(&name).await {
+                            error!("Failed to create MLS group '{}': {e}", name);
+                            StateActorReply::Status(Err(StateActorError::ChannelCreationFailed))
+                        } else {
+                            debug!("Successfully created MLS group '{}'", name);
+                            StateActorReply::Status(Ok(()))
+                        }
                     }
-                };
+                    Command::Users => StateActorReply::Status(Ok(())),
+                    Command::Groups => StateActorReply::Status(Ok(())),
+                    Command::Quit => StateActorReply::Status(Ok(())),
+                    Command::Nick { nickname } => {
+                        if let Some(nick) = nickname {
+                            self.identity_actor
+                                .tell(IdentityActorMsg {
+                                    handle_update: Some(nick),
+                                })
+                                .await
+                                .expect("Failed to set identity in IdentityActor.");
+                            StateActorReply::Status(Ok(()))
+                        } else {
+                            let identity = self
+                                .identity_actor
+                                .ask(IdentityActorMsg {
+                                    handle_update: None,
+                                })
+                                .await
+                                .expect("Failed to get identity from IdentityActor.");
+                            StateActorReply::ChatHandle(identity.handle.clone())
+                        }
+                    }
+                    Command::Safety => {
+                        // First, let's get the verifyingkey from the identity actor
+                        let verifying_key = match self
+                            .identity_actor
+                            .ask(crate::identity_actor::IdentityActorMsg {
+                                handle_update: None,
+                            })
+                            .await
+                        {
+                            Ok(reply) => reply.verifying_key,
+                            Err(e) => {
+                                error!("Failed to get verifying key from IdentityActor: {e}");
+                                return StateActorReply::Status(Err(
+                                    StateActorError::SafetyNumberGenerationFailed,
+                                ));
+                            }
+                        };
 
-                // Generate the safety number for the user
-                match generate_safety_number(&verifying_key) {
-                    Ok(safety_number) => {
-                        debug!("Your safety number is: {safety_number}");
-                        StateActorReply::SafetyNumber(safety_number)
+                        // Generate the safety number for the user
+                        match generate_safety_number(&verifying_key) {
+                            Ok(safety_number) => {
+                                debug!("Your safety number is: {safety_number}");
+                                StateActorReply::SafetyNumber(safety_number)
+                            }
+                            Err(_) => StateActorReply::Status(Err(
+                                StateActorError::SafetyNumberGenerationFailed,
+                            )),
+                        }
                     }
-                    Err(_) => {
-                        StateActorReply::Status(Err(StateActorError::SafetyNumberGenerationFailed))
+                    Command::Group { name: group_name } => {
+                        if let Some(name) = group_name {
+                            // User wants to set the active group
+                            if self.groups.contains_key(&name) {
+                                self.active_group = Some(name);
+                                StateActorReply::Status(Ok(()))
+                            } else {
+                                StateActorReply::Status(Err(StateActorError::GroupNotFound))
+                            }
+                        } else {
+                            // User wants to get the current active group
+                            if let Some(active_name) = &self.active_group {
+                                StateActorReply::ActiveGroup(Some(active_name.clone()))
+                            } else {
+                                // This should not happen; active_group should always be in groups
+                                StateActorReply::ActiveGroup(None)
+                            }
+                        }
                     }
                 }
             }
-            Command::Group { name: group_name } => {
-                if let Some(name) = group_name {
-                    // User wants to set the active group
-                    if self.groups.contains_key(&name) {
-                        self.active_group = Some(name);
-                        StateActorReply::Status(Ok(()))
-                    } else {
-                        StateActorReply::Status(Err(StateActorError::GroupNotFound))
-                    }
-                } else {
-                    // User wants to get the current active group
-                    if let Some(active_name) = &self.active_group {
-                        StateActorReply::ActiveGroup(Some(active_name.clone()))
-                    } else {
-                        // This should not happen; active_group should always be in groups
-                        StateActorReply::ActiveGroup(None)
-                    }
-                }
-            }
+            StateActorMessage::Encrypt(plaintext_payload) => todo!(),
+            StateActorMessage::Decrypt(chat_packet) => todo!(),
         }
     }
 }

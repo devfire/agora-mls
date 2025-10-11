@@ -6,7 +6,7 @@ use tracing::{debug, error};
 use crate::{
     command::Command,
     network,
-    state_actor::{StateActor, StateActorReply},
+    state_actor::{self, StateActor, StateActorMessage, StateActorReply},
 };
 
 pub struct Processor {
@@ -31,7 +31,8 @@ impl Processor {
     /// Spawn a task to handle user input from stdin.
     pub fn spawn_stdin_input_task(
         &self,
-        sender: tokio::sync::mpsc::Sender<Command>,
+        command_sender: tokio::sync::mpsc::Sender<Command>,
+        message_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         // get the chat handle from the state actor
 
@@ -64,6 +65,8 @@ impl Processor {
                 }
             };
 
+            // This just fans out commands & messages to the respective handlers very fast.
+            // Replies either go to the display or to the network outbound
             loop {
                 let readline = rustyline_editor.readline(&format!(" > "));
 
@@ -82,7 +85,7 @@ impl Processor {
                                     debug!("Command entered: {:?}", c);
                                     debug!("Attempting to send command to handler task...");
                                     // Use blocking_send since we're in a blocking context
-                                    if sender.blocking_send(c).is_err() {
+                                    if command_sender.blocking_send(c).is_err() {
                                         error!(
                                             "Failed to send command: receiver has been dropped."
                                         );
@@ -96,6 +99,16 @@ impl Processor {
                                         error!("Command processing failed with {e}");
                                     }
                                 }
+                            }
+                        }
+                        // end of if line.starts_with('/')
+                        else {
+                            // not a command, we need to encrypt & ship the msg
+                            if message_sender.blocking_send(line).is_err() {
+                                error!(
+                                    "Failed to send message: spawn_message_handler_task receiver has been dropped."
+                                );
+                                break;
                             }
                         }
                     }
@@ -123,6 +136,18 @@ impl Processor {
             debug!("Starting message handler task.");
             while let Some(message) = receiver.recv().await {
                 debug!("Message handler received: {:?}", message);
+
+                // Send to the state actor for encryption and multicast
+                match state_actor.tell(StateActorMessage::Encrypt(message)).await {
+                    Ok(_) => {
+                        debug!("Message dispatched successfully.");
+                    }
+                    Err(e) => {
+                        error!(
+                            "Something horrible happened with the spawn_message_handler_task(): {e} "
+                        )
+                    }
+                }
             }
         })
     }
@@ -139,7 +164,7 @@ impl Processor {
                 debug!("Command handler received command: {:?}", command);
 
                 // Forward the command to the state actor and await the reply
-                match state_actor.ask(command).await {
+                match state_actor.ask(StateActorMessage::Command(command)).await {
                     Ok(reply) => {
                         debug!("State actor replied with: {}", reply);
                         match reply {
@@ -201,7 +226,10 @@ impl Processor {
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             debug!("Starting message display task.");
-            let chat_id = match state_actor.ask(Command::Nick { nickname: None }).await {
+            let chat_id = match state_actor
+                .ask(StateActorMessage::Command(Command::Nick { nickname: None }))
+                .await
+            {
                 Ok(StateActorReply::ChatHandle(handle)) => handle,
                 Err(e) => {
                     error!("Unable to get chat handle: {}", e);
