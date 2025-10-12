@@ -228,6 +228,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
                 let proto_in: MlsMessageIn = chat_packet
                     .try_into()
                     .expect("Should have been able to convert into a protobuf struct");
+
                 // Let's get the active group name first
                 let active_group_name = if let Some(active_group) = &self.active_group {
                     active_group
@@ -244,7 +245,66 @@ impl KameoMessage<StateActorMessage> for StateActor {
                     return StateActorReply::Status(Err(StateActorError::GroupNotFound));
                 };
 
-                StateActorReply::Status(Ok(()))
+                // Extract and convert the message body to ProtocolMessage
+                let protocol_message = match proto_in.extract() {
+                    MlsMessageBodyIn::PublicMessage(msg) => ProtocolMessage::from(msg),
+                    MlsMessageBodyIn::PrivateMessage(msg) => ProtocolMessage::from(msg),
+                    _ => {
+                        error!("Received unsupported message type");
+                        return StateActorReply::Status(Err(StateActorError::EncryptionFailed));
+                    }
+                };
+
+                // Process the incoming MLS message to decrypt it
+                let processed_message = match mls_group_ref.process_message(
+                    &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                    protocol_message,
+                ) {
+                    Ok(processed) => processed,
+                    Err(e) => {
+                        error!("Failed to process MLS message: {:?}", e);
+                        return StateActorReply::Status(Err(StateActorError::EncryptionFailed));
+                    }
+                };
+
+                // Extract the application message from the processed message
+                match processed_message.into_content() {
+                    ProcessedMessageContent::ApplicationMessage(app_msg) => {
+                        // Decode the plaintext bytes into a UTF-8 string
+                        let decrypted_text = match String::from_utf8(app_msg.into_bytes()) {
+                            Ok(text) => text,
+                            Err(e) => {
+                                error!("Failed to decode decrypted message as UTF-8: {:?}", e);
+                                return StateActorReply::Status(Err(
+                                    StateActorError::EncryptionFailed,
+                                ));
+                            }
+                        };
+
+                        debug!("Successfully decrypted message: {}", decrypted_text);
+                        StateActorReply::DecryptedMessage(decrypted_text)
+                    }
+                    ProcessedMessageContent::ProposalMessage(_) => {
+                        debug!("Received proposal message");
+                        StateActorReply::Status(Ok(()))
+                    }
+                    ProcessedMessageContent::ExternalJoinProposalMessage(_) => {
+                        debug!("Received external join proposal");
+                        StateActorReply::Status(Ok(()))
+                    }
+                    ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
+                        debug!("Received staged commit - merging changes");
+                        // Merge the staged commit to update group state
+                        if let Err(e) = mls_group_ref.merge_staged_commit(
+                            &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                            *staged_commit,
+                        ) {
+                            error!("Failed to merge staged commit: {:?}", e);
+                            return StateActorReply::Status(Err(StateActorError::GroupStateError));
+                        }
+                        StateActorReply::Status(Ok(()))
+                    }
+                }
             }
         }
     }
