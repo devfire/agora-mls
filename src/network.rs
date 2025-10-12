@@ -1,4 +1,4 @@
-use crate::agora_chat::ChatPacket;
+use crate::agora_chat::MlsMessageOut;
 use crate::error::NetworkError;
 
 use prost::Message;
@@ -276,7 +276,7 @@ impl NetworkManager {
     ///
     /// Serializes the packet and sends it to the configured multicast address.
     /// Uses efficient encoding for better performance with large packets.
-    pub async fn send_message(&self, packet: ChatPacket) -> Result<()> {
+    pub async fn send_message(&self, packet: MlsMessageOut) -> Result<()> {
         // Pre-allocate buffer with reasonable initial capacity for better performance
         let mut packet_bytes = Vec::with_capacity(4096);
 
@@ -297,7 +297,7 @@ impl NetworkManager {
     ///
     /// Uses a pre-allocated buffer for better performance. The buffer size
     /// is configured during NetworkManager creation.
-    pub async fn receive_message(&self) -> Result<ChatPacket> {
+    pub async fn receive_message(&self) -> Result<MlsMessageOut> {
         // Pre-allocate buffer with configured size for optimal performance
         let mut buffer = vec![0u8; self.config.buffer_size];
 
@@ -307,7 +307,7 @@ impl NetworkManager {
             .context("Failed to receive data from socket")?;
 
         // Only decode the actual received bytes to avoid processing padding
-        let packet = ChatPacket::decode(&buffer[..len])
+        let packet = MlsMessageOut::decode(&buffer[..len])
             .context(format!("Failed to decode packet from {}", remote_addr))?;
 
         debug!("Received {} bytes from {} (decoded to packet: {:?})", len, remote_addr, packet);

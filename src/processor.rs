@@ -1,5 +1,5 @@
 use kameo::prelude::ActorRef;
-use openmls::prelude::*;
+
 use rustyline::{DefaultEditor, error::ReadlineError};
 use std::{
     sync::Arc,
@@ -8,7 +8,7 @@ use std::{
 use tracing::{debug, error};
 
 use crate::{
-    agora_chat::ChatPacket,
+    agora_chat::MlsMessageOut,
     command::Command,
     network,
     state_actor::{StateActor, StateActorMessage, StateActorReply},
@@ -189,39 +189,22 @@ impl Processor {
                                     }
                                 };
 
-                                // Serialize the MLS message
-                                let mls_bytes = match mls_message_out.to_bytes() {
-                                    Ok(bytes) => bytes,
-                                    Err(e) => {
-                                        error!("Failed to serialize MLS message: {}", e);
-                                        continue;
-                                    }
-                                };
+                                // // Serialize the MLS message
+                                // let mls_bytes = match mls_message_out.to_bytes() {
+                                //     Ok(bytes) => bytes,
+                                //     Err(e) => {
+                                //         error!("Failed to serialize MLS message: {}", e);
+                                //         continue;
+                                //     }
+                                // };
 
-                                let timestamp = SystemTime::now()
-                                    .duration_since(UNIX_EPOCH)
-                                    .expect("Failed to get system time") // if this failed, we are done for, bail.
-                                    .as_nanos()
-                                    as u64;
-                                // Package into ChatPacket
-                                let chat_packet = ChatPacket {
-                                    message_id: uuid::Uuid::new_v4().to_string(),
-                                    timestamp ,
-                                    sender_id: chat_id.clone(),
-                                    group_id: active_group.as_bytes().to_vec(),
-                                    message_type: Some(crate::agora_chat::chat_packet::MessageType::MlsMessage(
-                                        crate::agora_chat::MlsMessage {
-                                            message_type: crate::agora_chat::MlsMessageType::MlsMessageApplication as i32,
-                                            mls_content: mls_bytes,
-                                            epoch: 0, // TODO: Get actual epoch from MlsGroup
-                                        },
-                                    )),
-                                };
+                       
+                             
 
-                                // Send the packet over the network
-                                if let Err(e) = network_manager.send_message(chat_packet).await {
-                                    error!("Failed to send message over network: {}", e);
-                                }
+                                // // Send the packet over the network
+                                // if let Err(e) = network_manager.send_message(chat_packet).await {
+                                //     error!("Failed to send message over network: {}", e);
+                                // }
                             }
                         }
                     }

@@ -9,6 +9,7 @@ pub mod openmls_actor;
 pub mod state_actor;
 pub mod identity_actor;
 pub mod safety_number;
+pub mod protobuf_wrapper;
 
 // Re-export commonly used items for easier access
 pub use crate::cli::ChatArgs;
