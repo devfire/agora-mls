@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-
+use prost::Message;
 use tracing::{debug, error};
 
-use kameo::prelude::*;
+use kameo::{message::Message as KameoMessage, prelude::*};
 use openmls::prelude::*;
-use tracing_subscriber::field::debug;
 
 use crate::{
     agora_chat::{ChatPacket, PlaintextPayload},
@@ -64,7 +63,7 @@ pub enum StateActorReply {
 //     }
 // }
 
-impl Message<StateActorMessage> for StateActor {
+impl KameoMessage<StateActorMessage> for StateActor {
     // https://docs.page/tqwewe/kameo/core-concepts/replies
     type Reply = StateActorReply;
 
@@ -190,12 +189,11 @@ impl Message<StateActorMessage> for StateActor {
                     return StateActorReply::Status(Err(StateActorError::GroupNotFound));
                 };
 
-
                 // OK, let's try to encrypt the message
                 let mls_msg_out = match mls_group_ref.create_message(
                     &openmls_rust_crypto::OpenMlsRustCrypto::default(),
                     &*mls_identity.signature_keypair,
-                    plaintext_payload,
+                    plaintext_payload.encode_to_vec().as_slice(),
                 ) {
                     Ok(m) => m,
                     Err(e) => {
