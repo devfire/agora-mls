@@ -1,4 +1,4 @@
-use crate::agora_chat::MlsMessageOut;
+use crate::{agora_chat::MlsMessageOut, protobuf_wrapper::ProtoMlsMessageOut};
 use crate::error::NetworkError;
 
 use prost::Message;
@@ -276,7 +276,7 @@ impl NetworkManager {
     ///
     /// Serializes the packet and sends it to the configured multicast address.
     /// Uses efficient encoding for better performance with large packets.
-    pub async fn send_message(&self, packet: MlsMessageOut) -> Result<()> {
+    pub async fn send_message(&self, packet: ProtoMlsMessageOut) -> Result<()> {
         // Pre-allocate buffer with reasonable initial capacity for better performance
         let mut packet_bytes = Vec::with_capacity(4096);
 

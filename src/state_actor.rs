@@ -13,6 +13,7 @@ use crate::{
     error::StateActorError,
     identity_actor::{IdentityActor, IdentityActorMsg},
     openmls_actor::{OpenMlsActor, OpenMlsIdentityRequest},
+    protobuf_wrapper::ProtoMlsMessageOut,
     safety_number::{SafetyNumber, generate_safety_number},
 };
 
@@ -39,7 +40,7 @@ pub enum StateActorReply {
     ChatHandle(String),
     SafetyNumber(SafetyNumber),
     ActiveGroup(Option<String>), // Currently active group, if any
-    EncryptedMessage(MlsMessageOut),
+    EncryptedMessage(ProtoMlsMessageOut),
 }
 
 // // implement Display for Reply
@@ -218,7 +219,11 @@ impl KameoMessage<StateActorMessage> for StateActor {
                     }
                 };
 
-                StateActorReply::Status(Ok(()))
+                let protobuf_message: ProtoMlsMessageOut = mls_msg_out
+                    .try_into()
+                    .expect("Failed to TryFrom on MlsMessageOut");
+                // Return the encrypted wrapped packet for network multicast
+                StateActorReply::EncryptedMessage(protobuf_message)
             }
             StateActorMessage::Decrypt(chat_packet) => todo!(),
         }

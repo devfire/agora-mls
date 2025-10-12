@@ -1,5 +1,6 @@
 use kameo::prelude::ActorRef;
 
+use prost::Message;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use std::{
     sync::Arc,
@@ -167,7 +168,7 @@ impl Processor {
                             StateActorReply::ChatHandle(_) => todo!(),
                             StateActorReply::SafetyNumber(safety_number) => todo!(),
                             StateActorReply::ActiveGroup(_) => todo!(),
-                            StateActorReply::EncryptedMessage(mls_message_out) => {
+                            StateActorReply::EncryptedMessage(proto_mls_msg_out) => {
                                 // Get active group info for group_id
                                 let active_group = match state_actor
                                     .ask(StateActorMessage::Command(Command::Group { name: None }))
@@ -189,22 +190,10 @@ impl Processor {
                                     }
                                 };
 
-                                // // Serialize the MLS message
-                                // let mls_bytes = match mls_message_out.to_bytes() {
-                                //     Ok(bytes) => bytes,
-                                //     Err(e) => {
-                                //         error!("Failed to serialize MLS message: {}", e);
-                                //         continue;
-                                //     }
-                                // };
-
-                       
-                             
-
-                                // // Send the packet over the network
-                                // if let Err(e) = network_manager.send_message(chat_packet).await {
-                                //     error!("Failed to send message over network: {}", e);
-                                // }
+                                // Send the packet over the network
+                                if let Err(e) = network_manager.send_message(proto_mls_msg_out).await {
+                                    error!("Failed to send message over network: {}", e);
+                                }
                             }
                         }
                     }
