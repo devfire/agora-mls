@@ -179,6 +179,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
                 let active_group_name = if let Some(active_group) = &self.active_group {
                     active_group
                 } else {
+                    error!("No active group detected!");
                     return StateActorReply::Status(Err(StateActorError::NoActiveGroup));
                 };
 

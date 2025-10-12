@@ -1,5 +1,6 @@
 use kameo::prelude::ActorRef;
 
+use core::error;
 use prost::Message;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use std::{
@@ -164,7 +165,14 @@ impl Processor {
                         debug!("Message dispatched successfully.");
                         match reply {
                             StateActorReply::Groups(items) => todo!(),
-                            StateActorReply::Status(_) => todo!(),
+                            StateActorReply::Status(s) => match s {
+                                Ok(_) => {
+                                    debug!("All's well proceeding with encryption & serialization.")
+                                }
+                                Err(e) => {
+                                    error!("Oh no: {e}");
+                                }
+                            },
                             StateActorReply::ChatHandle(_) => todo!(),
                             StateActorReply::SafetyNumber(safety_number) => todo!(),
                             StateActorReply::ActiveGroup(_) => todo!(),
@@ -191,7 +199,9 @@ impl Processor {
                                 };
 
                                 // Send the packet over the network
-                                if let Err(e) = network_manager.send_message(proto_mls_msg_out).await {
+                                if let Err(e) =
+                                    network_manager.send_message(proto_mls_msg_out).await
+                                {
                                     error!("Failed to send message over network: {}", e);
                                 }
                             }
