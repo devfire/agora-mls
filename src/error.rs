@@ -1,3 +1,4 @@
+use prost::DecodeError;
 use std::net::SocketAddr;
 use thiserror::Error;
 
@@ -73,6 +74,15 @@ pub enum SafetyNumberError {
 
 #[derive(Error, Debug)]
 pub enum ProtobufWrapperError {
-    #[error("Failed to serialize MLS message: {0}")]
-    SerializationFailed(String),
+    #[error("Failed to serialize MLS message")]
+    SerializationFailed(#[from] openmls::prelude::Error),
+
+    #[error("Failed to decode Protobuf message")]
+    ProtobufDecode(#[from] DecodeError),
+
+    #[error("MLS message body is empty or invalid")]
+    MlsMessageBodyInvalid,
+
+    #[error("OpenMLS failed to process the message")]
+    MlsMessageInvalid(#[from] openmls::framing::errors::MlsMessageError),
 }

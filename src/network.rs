@@ -1,3 +1,4 @@
+use crate::protobuf_wrapper::ProtoMlsMessageIn;
 use crate::{agora_chat::MlsMessageOut, protobuf_wrapper::ProtoMlsMessageOut};
 use crate::error::NetworkError;
 
@@ -297,7 +298,7 @@ impl NetworkManager {
     ///
     /// Uses a pre-allocated buffer for better performance. The buffer size
     /// is configured during NetworkManager creation.
-    pub async fn receive_message(&self) -> Result<MlsMessageOut> {
+    pub async fn receive_message(&self) -> Result<ProtoMlsMessageIn> {
         // Pre-allocate buffer with configured size for optimal performance
         let mut buffer = vec![0u8; self.config.buffer_size];
 
@@ -307,7 +308,7 @@ impl NetworkManager {
             .context("Failed to receive data from socket")?;
 
         // Only decode the actual received bytes to avoid processing padding
-        let packet = MlsMessageOut::decode(&buffer[..len])
+        let packet = ProtoMlsMessageIn::decode(&buffer[..len])
             .context(format!("Failed to decode packet from {}", remote_addr))?;
 
         debug!("Received {} bytes from {} (decoded to packet: {:?})", len, remote_addr, packet);

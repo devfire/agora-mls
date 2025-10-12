@@ -12,7 +12,7 @@ use crate::{
     error::StateActorError,
     identity_actor::{IdentityActor, IdentityActorMsg},
     openmls_actor::{OpenMlsActor, OpenMlsIdentityRequest},
-    protobuf_wrapper::ProtoMlsMessageOut,
+    protobuf_wrapper::{ProtoMlsMessageIn, ProtoMlsMessageOut},
     safety_number::{SafetyNumber, generate_safety_number},
 };
 
@@ -25,11 +25,10 @@ pub struct StateActor {
     mls_identity_actor: ActorRef<OpenMlsActor>,
 }
 
-#[derive(Debug)]
 pub enum StateActorMessage {
     Command(Command),
     Encrypt(String),
-    Decrypt(MlsMessageIn),
+    Decrypt(ProtoMlsMessageIn),
 }
 
 #[derive(Reply)]
@@ -40,6 +39,7 @@ pub enum StateActorReply {
     SafetyNumber(SafetyNumber),
     ActiveGroup(Option<String>), // Currently active group, if any
     EncryptedMessage(ProtoMlsMessageOut),
+    DecryptedMessage(String),
 }
 
 // // implement Display for Reply
@@ -73,7 +73,6 @@ impl KameoMessage<StateActorMessage> for StateActor {
         _ctx: &mut kameo::message::Context<Self, StateActorReply>,
     ) -> Self::Reply {
         // Logic to process the message and generate a reply
-        debug!("StateActor received StateActorMessage: {:?}", msg);
         match msg {
             StateActorMessage::Command(command) => {
                 match command {
@@ -225,7 +224,28 @@ impl KameoMessage<StateActorMessage> for StateActor {
                 // Return the encrypted wrapped packet for network multicast
                 StateActorReply::EncryptedMessage(protobuf_message)
             }
-            StateActorMessage::Decrypt(chat_packet) => todo!(),
+            StateActorMessage::Decrypt(chat_packet) => {
+                let proto_in: MlsMessageIn = chat_packet
+                    .try_into()
+                    .expect("Should have been able to convert into a protobuf struct");
+                // Let's get the active group name first
+                let active_group_name = if let Some(active_group) = &self.active_group {
+                    active_group
+                } else {
+                    debug!("No active group detected.");
+                    return StateActorReply::Status(Err(StateActorError::NoActiveGroup));
+                };
+
+                // Now, armed with the active group, let's get a reference to the MlsGroup
+                let mls_group_ref = if let Some(mls_group) = self.groups.get_mut(active_group_name)
+                {
+                    mls_group
+                } else {
+                    return StateActorReply::Status(Err(StateActorError::GroupNotFound));
+                };
+
+                StateActorReply::Status(Ok(()))
+            }
         }
     }
 }

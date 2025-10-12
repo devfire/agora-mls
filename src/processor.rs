@@ -209,6 +209,7 @@ impl Processor {
                                     error!("Failed to send message over network: {}", e);
                                 }
                             }
+                            StateActorReply::DecryptedMessage(_) => todo!(),
                         }
                     }
                     Err(e) => {
@@ -268,6 +269,7 @@ impl Processor {
                         StateActorReply::EncryptedMessage(_) => {
                             unreachable!("We'll never return an encrypted msg to a command")
                         }
+                        StateActorReply::DecryptedMessage(_) => todo!(),
                     },
                     Err(e) => {
                         error!("Failed to send command to state actor: {}", e);
