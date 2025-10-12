@@ -97,7 +97,13 @@ impl Processor {
                                     if e.kind() == clap::error::ErrorKind::DisplayHelp {
                                         Command::show_custom_help();
                                     } else {
-                                        error!("Command processing failed with {e}");
+                                        debug!("Command processing failed with {e}");
+                                        if message_sender.blocking_send(e.to_string()).is_err() {
+                                            error!(
+                                                "Unable to send error from spawn_stdin_input_task"
+                                            );
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -131,6 +137,7 @@ impl Processor {
         &self,
         state_actor: ActorRef<StateActor>,
         mut receiver: tokio::sync::mpsc::Receiver<String>,
+        message_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         let network_manager = self.network_manager.clone();
         tokio::spawn(async move {
@@ -139,19 +146,19 @@ impl Processor {
             while let Some(message) = receiver.recv().await {
                 debug!("Message handler received: {:?}", message);
 
-                let chat_id = match state_actor
-                    .ask(StateActorMessage::Command(Command::Nick { nickname: None }))
-                    .await
-                {
-                    Ok(StateActorReply::ChatHandle(handle)) => handle,
-                    Err(e) => {
-                        error!("Unable to get chat handle: {}", e);
-                        return;
-                    }
-                    _ => {
-                        unreachable!("Expected ChatHandle reply")
-                    }
-                };
+                // let chat_id = match state_actor
+                //     .ask(StateActorMessage::Command(Command::Nick { nickname: None }))
+                //     .await
+                // {
+                //     Ok(StateActorReply::ChatHandle(handle)) => handle,
+                //     Err(e) => {
+                //         error!("Unable to get chat handle: {}", e);
+                //         return;
+                //     }
+                //     _ => {
+                //         unreachable!("Expected ChatHandle reply")
+                //     }
+                // };
 
                 // Send to the state actor for encryption and multicast
                 match state_actor.ask(StateActorMessage::Encrypt(message)).await {
@@ -164,7 +171,10 @@ impl Processor {
                                     debug!("All's well proceeding with encryption & serialization.")
                                 }
                                 Err(e) => {
-                                    error!("Oh no: {e}");
+                                    debug!("ERROR: {e}");
+                                    message_sender.send(e.to_string()).await.expect(
+                                        "Unable to send an update from spawn_message_handler_task.",
+                                    );
                                 }
                             },
                             StateActorReply::ChatHandle(_) => todo!(),
@@ -172,25 +182,25 @@ impl Processor {
                             StateActorReply::ActiveGroup(_) => todo!(),
                             StateActorReply::EncryptedMessage(proto_mls_msg_out) => {
                                 // Get active group info for group_id
-                                let active_group = match state_actor
-                                    .ask(StateActorMessage::Command(Command::Group { name: None }))
-                                    .await
-                                {
-                                    Ok(StateActorReply::ActiveGroup(Some(group_name))) => {
-                                        group_name
-                                    }
-                                    Ok(StateActorReply::ActiveGroup(None)) => {
-                                        error!("No active group found when sending message");
-                                        return;
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to get active group: {}", e);
-                                        return;
-                                    }
-                                    _ => {
-                                        unreachable!("Expected ActiveGroup reply")
-                                    }
-                                };
+                                // let active_group = match state_actor
+                                //     .ask(StateActorMessage::Command(Command::Group { name: None }))
+                                //     .await
+                                // {
+                                //     Ok(StateActorReply::ActiveGroup(Some(group_name))) => {
+                                //         group_name
+                                //     }
+                                //     Ok(StateActorReply::ActiveGroup(None)) => {
+                                //         error!("No active group found when sending message");
+                                //         return;
+                                //     }
+                                //     Err(e) => {
+                                //         error!("Failed to get active group: {}", e);
+                                //         return;
+                                //     }
+                                //     _ => {
+                                //         unreachable!("Expected ActiveGroup reply")
+                                //     }
+                                // };
 
                                 // Send the packet over the network
                                 if let Err(e) =
@@ -215,6 +225,7 @@ impl Processor {
         &self,
         state_actor: ActorRef<StateActor>,
         mut receiver: tokio::sync::mpsc::Receiver<Command>,
+        message_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         // let identity_handle = self.identity.handle.clone();
         tokio::spawn(async move {
@@ -229,14 +240,31 @@ impl Processor {
                             println!("Your current chat handle is: {}", handle);
                         }
                         StateActorReply::Status(result) => match result {
-                            Ok(_) => println!("Command executed successfully."),
-                            Err(e) => error!("Command processing failed with error: {:?}", e),
+                            Ok(_) => debug!("Command executed successfully."),
+                            Err(e) => {
+                                debug!("Command processing failed with error: {:?}", e);
+                                message_sender.send(e.to_string()).await.expect(
+                                    "Unable to send an update from spawn_command_handler_task",
+                                );
+                            }
                         },
                         StateActorReply::Groups(items) => todo!(),
                         StateActorReply::SafetyNumber(safety_number) => {
                             println!("{}", safety_number);
                         }
-                        StateActorReply::ActiveGroup(mls_group) => todo!(),
+                        StateActorReply::ActiveGroup(mls_group) => {
+                            let active_group = if let Some(active_group) = mls_group {
+                                debug!("Active group: {active_group}");
+                                active_group
+                            } else {
+                                debug!("No active group");
+                                crate::error::StateActorError::NoActiveGroup.to_string()
+                            };
+                            message_sender
+                                .send(active_group)
+                                .await
+                                .expect("Unable to send responses from spawn_command_handler_task");
+                        }
                         StateActorReply::EncryptedMessage(_) => {
                             unreachable!("We'll never return an encrypted msg to a command")
                         }
@@ -300,7 +328,7 @@ impl Processor {
             };
             while let Some(message) = receiver.recv().await {
                 eprint!("\r\x1b[K");
-                eprint!("{message}");
+                eprintln!("{message}");
                 // eprintln!(
                 //     "{} {}: {}",
                 //     message.timestamp, message.display_name, message.content

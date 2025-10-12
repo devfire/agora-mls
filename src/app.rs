@@ -41,8 +41,7 @@ impl App {
         let (command_sender, command_receiver) = tokio::sync::mpsc::channel::<Command>(100);
 
         // Create a channel for displaying messages to the user
-        let (display_sender, display_receiver) =
-            tokio::sync::mpsc::channel::<String>(100);
+        let (display_sender, display_receiver) = tokio::sync::mpsc::channel::<String>(100);
 
         // Create a channel for sending messages to the message handler
         let (message_sender, message_receiver) = tokio::sync::mpsc::channel::<String>(100);
@@ -67,11 +66,17 @@ impl App {
         // rather than waiting for each to complete before starting the next.
         let stdin_handle = processor.spawn_stdin_input_task(command_sender, message_sender);
 
-        let command_handle =
-            processor.spawn_command_handler_task(state_actor_ref.clone(), command_receiver);
+        let command_handle = processor.spawn_command_handler_task(
+            state_actor_ref.clone(),
+            command_receiver,
+            display_sender.clone(),
+        );
 
-        let message_handle =
-            processor.spawn_message_handler_task(state_actor_ref.clone(), message_receiver);
+        let message_handle = processor.spawn_message_handler_task(
+            state_actor_ref.clone(),
+            message_receiver,
+            display_sender,
+        );
 
         // Start the UDP intake task to listen for incoming messages
         let udp_intake_handle = processor.spawn_udp_input_task(state_actor_ref.clone());
