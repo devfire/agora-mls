@@ -8,7 +8,6 @@ use kameo::{message::Message as KameoMessage, prelude::*};
 use openmls::prelude::*;
 
 use crate::{
-    agora_chat::MlsMessageOut,
     command::Command,
     error::StateActorError,
     identity_actor::{IdentityActor, IdentityActorMsg},
