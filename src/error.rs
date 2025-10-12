@@ -55,6 +55,12 @@ pub enum StateActorError {
 
     #[error("No active group")]
     NoActiveGroup,
+
+    #[error("Encryption failed")]
+    EncryptionFailed,
+
+    #[error("Group state error")]
+    GroupStateError,
 }
 
 #[derive(Error, Debug)]

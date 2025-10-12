@@ -1,12 +1,16 @@
 use kameo::prelude::ActorRef;
 use rustyline::{DefaultEditor, error::ReadlineError};
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tracing::{debug, error};
 
 use crate::{
+    agora_chat::PlaintextPayload,
     command::Command,
     network,
-    state_actor::{self, StateActor, StateActorMessage, StateActorReply},
+    state_actor::{StateActor, StateActorMessage, StateActorReply},
 };
 
 pub struct Processor {
@@ -134,13 +138,50 @@ impl Processor {
         // let identity_handle = self.identity.handle.clone();
         tokio::spawn(async move {
             debug!("Starting message handler task.");
+
             while let Some(message) = receiver.recv().await {
                 debug!("Message handler received: {:?}", message);
 
+                let chat_id = match state_actor
+                    .ask(StateActorMessage::Command(Command::Nick { nickname: None }))
+                    .await
+                {
+                    Ok(StateActorReply::ChatHandle(handle)) => handle,
+                    Err(e) => {
+                        error!("Unable to get chat handle: {}", e);
+                        return;
+                    }
+                    _ => {
+                        unreachable!("Expected ChatHandle reply")
+                    }
+                };
+
+                // create the plaintextpayload of the message
+                let plaintext_payload = PlaintextPayload {
+                    display_name: chat_id,
+                    content: message,
+                    timestamp: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Failed to get system time") // if this failed, we are done for, bail.
+                        .as_nanos() as u64,
+                };
                 // Send to the state actor for encryption and multicast
-                match state_actor.tell(StateActorMessage::Encrypt(message)).await {
-                    Ok(_) => {
+                match state_actor
+                    .ask(StateActorMessage::Encrypt(plaintext_payload))
+                    .await
+                {
+                    Ok(reply) => {
                         debug!("Message dispatched successfully.");
+                        match reply {
+                            StateActorReply::Groups(items) => todo!(),
+                            StateActorReply::Status(_) => todo!(),
+                            StateActorReply::ChatHandle(_) => todo!(),
+                            StateActorReply::SafetyNumber(safety_number) => todo!(),
+                            StateActorReply::ActiveGroup(_) => todo!(),
+                            StateActorReply::EncryptedMessage(mls_message_out) => {
+                                // package it up and send it
+                            }
+                        }
                     }
                     Err(e) => {
                         error!(
@@ -178,7 +219,9 @@ impl Processor {
                             println!("{}", safety_number);
                         }
                         StateActorReply::ActiveGroup(mls_group) => todo!(),
-                        StateActorReply::EncryptedMessage(mls_message_out) => todo!(),
+                        StateActorReply::EncryptedMessage(_) => {
+                            unreachable!("We'll never return an encrypted msg to a command")
+                        }
                     },
                     Err(e) => {
                         error!("Failed to send command to state actor: {}", e);

@@ -29,7 +29,7 @@ pub struct StateActor {
 #[derive(Debug)]
 pub enum StateActorMessage {
     Command(Command),
-    Encrypt(String),
+    Encrypt(PlaintextPayload),
     Decrypt(ChatPacket),
 }
 
@@ -183,37 +183,43 @@ impl Message<StateActorMessage> for StateActor {
                 };
 
                 // Now, armed with the active group, let's get a reference to the MlsGroup
-                let mls_group_ref = if let Some(mls_group) = self.groups.get_mut(active_group_name) {
+                let mls_group_ref = if let Some(mls_group) = self.groups.get_mut(active_group_name)
+                {
                     mls_group
                 } else {
                     return StateActorReply::Status(Err(StateActorError::GroupNotFound));
                 };
 
-                // OK, let's try to encrypt the message
-                let mls_msg_out = mls_group_ref
-                    .create_message(
-                        &openmls_rust_crypto::OpenMlsRustCrypto::default(),
-                        &*mls_identity.signature_keypair,
-                        plaintext_payload.as_bytes(),
-                    )
-                    .expect("Should have been able to encrypt the message");
 
-                // let mls_msg_out = if let Some(active_group) = self.active_group {
-                //     // get the MlsGroup details
-                //     if let Some(mls_group) = self.groups.get(&active_group) {
-                //         match mls_group.create_message(
-                //             &openmls_rust_crypto::OpenMlsRustCrypto::default(),
-                //             &*mls_identity.signature_keypair,
-                //             plaintext_payload.as_bytes(),
-                //         ) {
-                //             Ok(m) => m,
-                //             Err(e) => e,
-                //         }
-                //     } else {
-                //         error!("MLS Group not found - very bad!");
-                //         StateActorError::GroupNotFound
-                //     }
-                // };
+                // OK, let's try to encrypt the message
+                let mls_msg_out = match mls_group_ref.create_message(
+                    &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                    &*mls_identity.signature_keypair,
+                    plaintext_payload,
+                ) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        // Handle both error types in one shot with a single return
+                        let error = match e {
+                            CreateMessageError::LibraryError(library_error) => {
+                                error!(
+                                    "Library error during message creation: {:?}",
+                                    library_error
+                                );
+                                StateActorError::EncryptionFailed
+                            }
+                            CreateMessageError::GroupStateError(mls_group_state_error) => {
+                                error!(
+                                    "Group state error during message creation: {:?}",
+                                    mls_group_state_error
+                                );
+                                StateActorError::GroupStateError
+                            }
+                        };
+                        return StateActorReply::Status(Err(error));
+                    }
+                };
+
                 StateActorReply::EncryptedMessage(mls_msg_out)
             }
             StateActorMessage::Decrypt(chat_packet) => todo!(),
