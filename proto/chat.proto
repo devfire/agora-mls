@@ -22,18 +22,6 @@ message ChatPacket {
   }
 }
 
-// Application-level chat messages (encrypted by MLS)
-message PlaintextPayload {
-   // Human readable name
-  string display_name = 1;
-
-  // Actual chat message content (Unicode text)
-  string content = 2;
-
-  // Unix nanosecond timestamp (allows message ordering despite network delays)
-  uint64 timestamp = 3;
-}
-
 // MLS protocol messages
 message MlsMessage {
   MlsMessageType message_type = 1;

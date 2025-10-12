@@ -1,13 +1,15 @@
 use kameo::prelude::ActorRef;
+use openmls::prelude::*;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tls_codec::Serialize as TlsSerialize;
 use tracing::{debug, error};
 
 use crate::{
-    agora_chat::PlaintextPayload,
+    agora_chat::ChatPacket,
     command::Command,
     network,
     state_actor::{StateActor, StateActorMessage, StateActorReply},
@@ -135,7 +137,7 @@ impl Processor {
         state_actor: ActorRef<StateActor>,
         mut receiver: tokio::sync::mpsc::Receiver<String>,
     ) -> tokio::task::JoinHandle<()> {
-        // let identity_handle = self.identity.handle.clone();
+        let network_manager = self.network_manager.clone();
         tokio::spawn(async move {
             debug!("Starting message handler task.");
 
@@ -156,20 +158,8 @@ impl Processor {
                     }
                 };
 
-                // create the plaintextpayload of the message
-                let plaintext_payload = PlaintextPayload {
-                    display_name: chat_id,
-                    content: message,
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .expect("Failed to get system time") // if this failed, we are done for, bail.
-                        .as_nanos() as u64,
-                };
                 // Send to the state actor for encryption and multicast
-                match state_actor
-                    .ask(StateActorMessage::Encrypt(plaintext_payload))
-                    .await
-                {
+                match state_actor.ask(StateActorMessage::Encrypt(message)).await {
                     Ok(reply) => {
                         debug!("Message dispatched successfully.");
                         match reply {
@@ -179,8 +169,56 @@ impl Processor {
                             StateActorReply::SafetyNumber(safety_number) => todo!(),
                             StateActorReply::ActiveGroup(_) => todo!(),
                             StateActorReply::EncryptedMessage(mls_message_out) => {
-                                // package it up and send it
-                                
+                                // Get active group info for group_id
+                                let active_group = match state_actor
+                                    .ask(StateActorMessage::Command(Command::Group { name: None }))
+                                    .await
+                                {
+                                    Ok(StateActorReply::ActiveGroup(Some(group_name))) => {
+                                        group_name
+                                    }
+                                    Ok(StateActorReply::ActiveGroup(None)) => {
+                                        error!("No active group found when sending message");
+                                        return;
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to get active group: {}", e);
+                                        return;
+                                    }
+                                    _ => {
+                                        unreachable!("Expected ActiveGroup reply")
+                                    }
+                                };
+
+                                // Serialize the MLS message
+                                let mls_bytes = mls_message_out
+                                    .tls_serialize_detached()
+                                    .expect("Failed to serialize MLS message");
+
+                                let timestamp = SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .expect("Failed to get system time") // if this failed, we are done for, bail.
+                                    .as_nanos()
+                                    as u64;
+                                // Package into ChatPacket
+                                let chat_packet = ChatPacket {
+                                    message_id: uuid::Uuid::new_v4().to_string(),
+                                    timestamp ,
+                                    sender_id: chat_id.clone(),
+                                    group_id: active_group.as_bytes().to_vec(),
+                                    message_type: Some(crate::agora_chat::chat_packet::MessageType::MlsMessage(
+                                        crate::agora_chat::MlsMessage {
+                                            message_type: crate::agora_chat::MlsMessageType::MlsMessageApplication as i32,
+                                            mls_content: mls_bytes,
+                                            epoch: 0, // TODO: Get actual epoch from MlsGroup
+                                        },
+                                    )),
+                                };
+
+                                // Send the packet over the network
+                                if let Err(e) = network_manager.send_message(chat_packet).await {
+                                    error!("Failed to send message over network: {}", e);
+                                }
                             }
                         }
                     }
@@ -264,7 +302,7 @@ impl Processor {
     pub fn spawn_message_display_task(
         &self,
         state_actor: ActorRef<StateActor>,
-        mut receiver: tokio::sync::mpsc::Receiver<crate::agora_chat::PlaintextPayload>,
+        mut receiver: tokio::sync::mpsc::Receiver<String>,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             debug!("Starting message display task.");
@@ -282,21 +320,13 @@ impl Processor {
                 }
             };
             while let Some(message) = receiver.recv().await {
-                if message.display_name != chat_id {
-                    debug!(
-                        "Chat processing received message from '{}' with content: '{}'",
-                        message.display_name, message.content
-                    );
-
-                    eprint!("\r\x1b[K");
-                    eprintln!(
-                        "{} {}: {}",
-                        message.timestamp, message.display_name, message.content
-                    );
-                    eprint!("{} > ", chat_id);
-                } else {
-                    debug!("Ignoring self-sent message from '{}'", message.display_name);
-                }
+                eprint!("\r\x1b[K");
+                eprint!("{message}");
+                // eprintln!(
+                //     "{} {}: {}",
+                //     message.timestamp, message.display_name, message.content
+                // );
+                eprint!("{} > ", chat_id);
             }
             debug!("Message display task ending.");
         })

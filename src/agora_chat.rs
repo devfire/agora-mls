@@ -35,19 +35,6 @@ pub mod chat_packet {
         GroupInfoRequest(super::GroupInfoRequest),
     }
 }
-/// Application-level chat messages (encrypted by MLS)
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct PlaintextPayload {
-    /// Human readable name
-    #[prost(string, tag = "1")]
-    pub display_name: ::prost::alloc::string::String,
-    /// Actual chat message content (Unicode text)
-    #[prost(string, tag = "2")]
-    pub content: ::prost::alloc::string::String,
-    /// Unix nanosecond timestamp (allows message ordering despite network delays)
-    #[prost(uint64, tag = "3")]
-    pub timestamp: u64,
-}
 /// MLS protocol messages
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct MlsMessage {

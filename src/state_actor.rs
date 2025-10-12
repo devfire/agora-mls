@@ -8,7 +8,7 @@ use kameo::{message::Message as KameoMessage, prelude::*};
 use openmls::prelude::*;
 
 use crate::{
-    agora_chat::{ChatPacket, PlaintextPayload},
+    agora_chat::ChatPacket,
     command::Command,
     error::StateActorError,
     identity_actor::{IdentityActor, IdentityActorMsg},
@@ -28,7 +28,7 @@ pub struct StateActor {
 #[derive(Debug)]
 pub enum StateActorMessage {
     Command(Command),
-    Encrypt(PlaintextPayload),
+    Encrypt(String),
     Decrypt(ChatPacket),
 }
 

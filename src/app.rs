@@ -1,5 +1,4 @@
 use crate::{
-    agora_chat::PlaintextPayload,
     command::Command,
     config::Config,
     identity_actor::IdentityActor,
@@ -43,7 +42,7 @@ impl App {
 
         // Create a channel for displaying messages to the user
         let (display_sender, display_receiver) =
-            tokio::sync::mpsc::channel::<PlaintextPayload>(100);
+            tokio::sync::mpsc::channel::<String>(100);
 
         // Create a channel for sending messages to the message handler
         let (message_sender, message_receiver) = tokio::sync::mpsc::channel::<String>(100);
