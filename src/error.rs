@@ -70,3 +70,9 @@ pub enum SafetyNumberError {
     #[error("Failed to generate safety number.")]
     QrCodeGenerationFailed,
 }
+
+#[derive(Error, Debug)]
+pub enum ProtobufWrapperError {
+    #[error("Failed to serialize MLS message: {0}")]
+    SerializationFailed(String),
+}

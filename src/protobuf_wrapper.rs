@@ -1,4 +1,5 @@
 use crate::agora_chat; // Your generated protobuf module
+use crate::error::ProtobufWrapperError;
 use openmls::prelude::{MlsMessageBodyOut, MlsMessageOut};
 use std::ops::Deref;
 
@@ -19,13 +20,19 @@ pub struct ProtoMlsMessageOut(pub agora_chat::MlsMessageOut);
 /// The resulting protobuf message includes the MLS 1.0 protocol version and the serialized
 /// message bytes wrapped in the appropriate message body variant.
 ///
-/// # Panics
-/// Panics if the MLS message cannot be serialized using the TLS codec.
-impl From<MlsMessageOut> for ProtoMlsMessageOut {
-    fn from(mls_message: MlsMessageOut) -> Self {
-        let mls_message_bytes = mls_message
-            .to_bytes()
-            .expect("Failed to serialize MLS message using tls_codec");
+/// # Errors
+/// Returns [`ProtobufWrapperError::SerializationFailed`] if the MLS message cannot be
+/// serialized using the TLS codec.
+impl TryFrom<MlsMessageOut> for ProtoMlsMessageOut {
+    type Error = ProtobufWrapperError;
+
+    fn try_from(mls_message: MlsMessageOut) -> Result<Self, Self::Error> {
+        let mls_message_bytes = mls_message.to_bytes().map_err(|e| {
+            ProtobufWrapperError::SerializationFailed(format!(
+                "Failed to serialize MLS message using tls_codec: {}",
+                e
+            ))
+        })?;
 
         let agora_chat_body = match mls_message.body() {
             MlsMessageBodyOut::PublicMessage(_) => {
@@ -65,7 +72,7 @@ impl From<MlsMessageOut> for ProtoMlsMessageOut {
             body: Some(agora_chat_body),
         };
 
-        Self(agora_chat_message_out)
+        Ok(Self(agora_chat_message_out))
     }
 }
 
