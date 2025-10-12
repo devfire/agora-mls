@@ -4,7 +4,7 @@ use crate::{
     config::Config,
     identity_actor::IdentityActor,
     network::{NetworkConfigBuilder, NetworkManager},
-    openmls_actor::OpenMlsIdentityActor,
+    openmls_actor::OpenMlsActor,
     processor::Processor,
     state_actor::StateActor,
 };
@@ -54,7 +54,7 @@ impl App {
         )?);
 
         let openmls_identity_actor_ref =
-            OpenMlsIdentityActor::spawn(OpenMlsIdentityActor::new(&identity_actor_ref).await);
+            OpenMlsActor::spawn(OpenMlsActor::new(&identity_actor_ref).await);
 
         let state_actor_ref = StateActor::spawn(StateActor::new(
             identity_actor_ref.clone(),
@@ -85,7 +85,7 @@ impl App {
         // The stdin_input_handle is the only one designed to finish, triggering a shutdown.
         tokio::select! {
             _ = udp_intake_handle => debug!("UDP intake task completed unexpectedly."),
-            // _ = display_handle => debug!("Display task completed unexpectedly."),
+            _ = display_handle => debug!("Display task completed unexpectedly."),
             _ = command_handle => debug!("Command task completed unexpectedly."),
             _ = message_handle => debug!("Message task completed unexpectedly."),
             _ = stdin_handle => debug!("Stdin task complete. Shutting down."),

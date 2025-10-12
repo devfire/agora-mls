@@ -83,7 +83,7 @@ impl Processor {
                             match Command::parse_command(&line) {
                                 Ok(c) => {
                                     debug!("Command entered: {:?}", c);
-                                    debug!("Attempting to send command to handler task...");
+
                                     // Use blocking_send since we're in a blocking context
                                     if command_sender.blocking_send(c).is_err() {
                                         error!(
@@ -165,23 +165,21 @@ impl Processor {
 
                 // Forward the command to the state actor and await the reply
                 match state_actor.ask(StateActorMessage::Command(command)).await {
-                    Ok(reply) => {
-                        debug!("State actor replied with: {}", reply);
-                        match reply {
-                            StateActorReply::ChatHandle(handle) => {
-                                println!("Your current chat handle is: {}", handle);
-                            }
-                            StateActorReply::Status(result) => match result {
-                                Ok(_) => println!("Command executed successfully."),
-                                Err(e) => error!("Command processing failed with error: {:?}", e),
-                            },
-                            StateActorReply::Groups(items) => todo!(),
-                            StateActorReply::SafetyNumber(safety_number) => {
-                                println!("{}", safety_number);
-                            }
-                            StateActorReply::ActiveGroup(mls_group) => todo!(),
+                    Ok(reply) => match reply {
+                        StateActorReply::ChatHandle(handle) => {
+                            println!("Your current chat handle is: {}", handle);
                         }
-                    }
+                        StateActorReply::Status(result) => match result {
+                            Ok(_) => println!("Command executed successfully."),
+                            Err(e) => error!("Command processing failed with error: {:?}", e),
+                        },
+                        StateActorReply::Groups(items) => todo!(),
+                        StateActorReply::SafetyNumber(safety_number) => {
+                            println!("{}", safety_number);
+                        }
+                        StateActorReply::ActiveGroup(mls_group) => todo!(),
+                        StateActorReply::EncryptedMessage(mls_message_out) => todo!(),
+                    },
                     Err(e) => {
                         error!("Failed to send command to state actor: {}", e);
                         break;

@@ -6,13 +6,14 @@ use tracing::{debug, error};
 
 use kameo::prelude::*;
 use openmls::prelude::*;
+use tracing_subscriber::field::debug;
 
 use crate::{
     agora_chat::{ChatPacket, PlaintextPayload},
     command::Command,
     error::StateActorError,
     identity_actor::{IdentityActor, IdentityActorMsg},
-    openmls_actor::{OpenMlsIdentityActor, OpenMlsIdentityRequest},
+    openmls_actor::{OpenMlsActor, OpenMlsIdentityRequest},
     safety_number::{SafetyNumber, generate_safety_number},
 };
 
@@ -22,7 +23,7 @@ pub struct StateActor {
     groups: HashMap<String, MlsGroup>, // Maps group name to MlsGroup
     active_group: Option<String>,      // Currently active group name, if any
     identity_actor: ActorRef<IdentityActor>,
-    mls_identity_actor: ActorRef<OpenMlsIdentityActor>,
+    mls_identity_actor: ActorRef<OpenMlsActor>,
 }
 
 #[derive(Debug)]
@@ -39,27 +40,29 @@ pub enum StateActorReply {
     ChatHandle(String),
     SafetyNumber(SafetyNumber),
     ActiveGroup(Option<String>), // Currently active group, if any
+    EncryptedMessage(MlsMessageOut),
 }
 
-// implement Display for Reply
-impl std::fmt::Display for StateActorReply {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StateActorReply::Groups(Some(channels)) => write!(f, "Channels: {:?}", channels),
-            StateActorReply::Groups(None) => write!(f, "No channels found"),
-            StateActorReply::Status(Ok(())) => write!(f, "Operation successful"),
-            StateActorReply::Status(Err(e)) => write!(f, "Operation failed: {}", e),
-            StateActorReply::ChatHandle(handle) => write!(f, "{handle}"),
-            StateActorReply::SafetyNumber(safety_number) => write!(
-                f,
-                "Safety Number: {}\nFull Hash: {}\nQR Code:\n{}",
-                safety_number.display_string, safety_number.full_hex, safety_number.qrcode
-            ),
-            StateActorReply::ActiveGroup(Some(mls_group)) => write!(f, "Active group tbd"),
-            StateActorReply::ActiveGroup(None) => write!(f, "No active group."),
-        }
-    }
-}
+// // implement Display for Reply
+// impl std::fmt::Display for StateActorReply {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         match self {
+//             StateActorReply::Groups(Some(channels)) => write!(f, "Channels: {:?}", channels),
+//             StateActorReply::Groups(None) => write!(f, "No channels found"),
+//             StateActorReply::Status(Ok(())) => write!(f, "Operation successful"),
+//             StateActorReply::Status(Err(e)) => write!(f, "Operation failed: {}", e),
+//             StateActorReply::ChatHandle(handle) => write!(f, "{handle}"),
+//             StateActorReply::SafetyNumber(safety_number) => write!(
+//                         f,
+//                         "Safety Number: {}\nFull Hash: {}\nQR Code:\n{}",
+//                         safety_number.display_string, safety_number.full_hex, safety_number.qrcode
+//                     ),
+//             StateActorReply::ActiveGroup(Some(mls_group)) => write!(f, "Active group tbd"),
+//             StateActorReply::ActiveGroup(None) => write!(f, "No active group."),
+// StateActorReply::EncryptedMessage(mls_message_out) => todo!(),
+//         }
+//     }
+// }
 
 impl Message<StateActorMessage> for StateActor {
     // https://docs.page/tqwewe/kameo/core-concepts/replies
@@ -163,7 +166,56 @@ impl Message<StateActorMessage> for StateActor {
                     }
                 }
             }
-            StateActorMessage::Encrypt(plaintext_payload) => todo!(),
+            StateActorMessage::Encrypt(plaintext_payload) => {
+                debug!("Encrypting message for transport");
+
+                let mls_identity = self
+                    .mls_identity_actor
+                    .ask(OpenMlsIdentityRequest)
+                    .await
+                    .expect("Expected to successfully call the mls actor");
+
+                // Let's get the active group name first
+                let active_group_name = if let Some(active_group) = &self.active_group {
+                    active_group
+                } else {
+                    return StateActorReply::Status(Err(StateActorError::NoActiveGroup));
+                };
+
+                // Now, armed with the active group, let's get a reference to the MlsGroup
+                let mls_group_ref = if let Some(mls_group) = self.groups.get_mut(active_group_name) {
+                    mls_group
+                } else {
+                    return StateActorReply::Status(Err(StateActorError::GroupNotFound));
+                };
+
+                // OK, let's try to encrypt the message
+                let mls_msg_out = mls_group_ref
+                    .create_message(
+                        &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                        &*mls_identity.signature_keypair,
+                        plaintext_payload.as_bytes(),
+                    )
+                    .expect("Should have been able to encrypt the message");
+
+                // let mls_msg_out = if let Some(active_group) = self.active_group {
+                //     // get the MlsGroup details
+                //     if let Some(mls_group) = self.groups.get(&active_group) {
+                //         match mls_group.create_message(
+                //             &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                //             &*mls_identity.signature_keypair,
+                //             plaintext_payload.as_bytes(),
+                //         ) {
+                //             Ok(m) => m,
+                //             Err(e) => e,
+                //         }
+                //     } else {
+                //         error!("MLS Group not found - very bad!");
+                //         StateActorError::GroupNotFound
+                //     }
+                // };
+                StateActorReply::EncryptedMessage(mls_msg_out)
+            }
             StateActorMessage::Decrypt(chat_packet) => todo!(),
         }
     }
@@ -172,7 +224,7 @@ impl Message<StateActorMessage> for StateActor {
 impl StateActor {
     pub fn new(
         identity_actor: ActorRef<IdentityActor>,
-        mls_identity_actor: ActorRef<OpenMlsIdentityActor>,
+        mls_identity_actor: ActorRef<OpenMlsActor>,
     ) -> Self {
         Self {
             groups: HashMap::new(),
