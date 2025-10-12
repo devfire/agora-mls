@@ -5,7 +5,6 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tls_codec::Serialize as TlsSerialize;
 use tracing::{debug, error};
 
 use crate::{
@@ -191,9 +190,13 @@ impl Processor {
                                 };
 
                                 // Serialize the MLS message
-                                let mls_bytes = mls_message_out
-                                    .tls_serialize_detached()
-                                    .expect("Failed to serialize MLS message");
+                                let mls_bytes = match mls_message_out.to_bytes() {
+                                    Ok(bytes) => bytes,
+                                    Err(e) => {
+                                        error!("Failed to serialize MLS message: {}", e);
+                                        continue;
+                                    }
+                                };
 
                                 let timestamp = SystemTime::now()
                                     .duration_since(UNIX_EPOCH)
