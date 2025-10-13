@@ -4,7 +4,7 @@
 
 **A secure, distributed chat application using Messaging Layer Security (MLS) over UDP multicast**
 
-Agora MLS is a decentralized chat client that leverages the OpenMLS protocol to provide end-to-end encrypted group messaging over UDP multicast. Built with modern Rust async patterns and an actor-based architecture, it offers a secure foundation for distributed communication without relying on centralized servers.
+Agora MLS is a distributed chat application that leverages the OpenMLS protocol to provide end-to-end encrypted group messaging over UDP multicast. Built with modern Rust async patterns and an actor-based architecture, it offers a secure foundation for decentralized communication without relying on centralized servers.
 
 ---
 
@@ -35,15 +35,18 @@ Agora MLS combines the security guarantees of the Messaging Layer Security (MLS)
 ## Features
 
 - 🔐 **MLS Protocol Integration**: Implements the Messaging Layer Security protocol for group encryption
-- 🌐 **UDP Multicast Communication**: Serverless networking using standard multicast groups
+- 🌐 **UDP Multicast Communication**: Serverless networking using UDP multicast groups
 - 🎭 **Identity Management**: Ed25519-based cryptographic identities with SSH key support
 - 🔄 **Actor-Based Architecture**: Concurrent message processing using the kameo actor framework
-- 💬 **Interactive CLI**: Full-featured command-line interface with rustyline support
-- 🔢 **Safety Numbers**: Verify participant identities with numeric fingerprints
-- 📦 **Protocol Buffers**: Efficient message serialization for network transmission
-- 🛡️ **Forward Secrecy**: Automatic key rotation and post-compromise security
+- 💬 **Interactive CLI**: Full-featured command-line interface with rustyline support and command parsing
+- 🔢 **Safety Numbers**: Generate identity verification fingerprints for security
+- 📦 **Protocol Buffers**: Efficient message serialization with prost and protobuf definitions
+- 🛡️ **End-to-End Encryption**: Secure group messaging with forward secrecy
 - 🔍 **Structured Logging**: Comprehensive tracing with configurable verbosity levels
 - ⚙️ **Flexible Configuration**: Multiple network interfaces and custom multicast addresses
+- 👥 **Group Management**: Create and manage multiple chat groups
+- 💬 **Private Messaging**: Send direct messages between users
+- 🔐 **SSH Key Integration**: Use existing SSH keys for identity management
 
 ---
 
@@ -58,14 +61,17 @@ Agora MLS combines the security guarantees of the Messaging Layer Security (MLS)
 
 ```bash
 # Clone the repository
-git clone https://github.com/<username>/agora-mls
+git clone https://github.com/devfire/agora-mls
 cd agora-mls
 
-# Build the project
+# Build the project (protobuf compilation happens automatically)
 cargo build --release
 
 # Run the application
 cargo run --release
+
+# Or install globally for easier access
+cargo install --path .
 ```
 
 ---
@@ -104,7 +110,7 @@ agora-mls --log-level debug
 Options:
   -c, --chat-id <ID>                    Unique identifier for this chat [default: random UUID]
   -l, --log-level <LEVEL>              Set the log level [default: info]
-                                        [possible values: error, warn, info, debug, trace]
+                                         [possible values: error, warn, info, debug, trace]
   -m, --multicast-address <ADDR:PORT>  UDP multicast address [default: 239.255.255.250:8080]
   -i, --interface <INTERFACE>          Network interface to bind to (e.g., 'eth0', '192.168.1.100')
   -k, --key-file <PATH>                Private key file path [default: ~/.ssh/id_ed25519]
@@ -112,14 +118,37 @@ Options:
   -V, --version                        Print version
 ```
 
+### Basic Usage Examples
+
+Start a chat session with default settings:
+
+```bash
+# Use your default SSH key and join with a random chat ID
+cargo run --release
+
+# Or use the binary directly if installed
+agora-mls
+```
+
+This will:
+- Use your default SSH key (`~/.ssh/id_ed25519`)
+- Generate a random chat ID
+- Join the default multicast group (`239.255.255.250:8080`)
+
 ### Interactive Commands
 
 Once running, use these commands in the chat interface:
 
-- `/help` - Display available commands
-- `/quit` or `/exit` - Leave the chat
-- `/users` - List active participants
-- `/safety <user>` - Display safety number for identity verification
+- `/invite <nick> [password]` - Invite a user to join a channel
+- `/leave [channel]` - Leave current or specified channel
+- `/msg <user> <message>` - Send a private message
+- `/create <name>` - Create a new group
+- `/users` - List users in current channel
+- `/groups` - List available groups
+- `/group [name]` - Display or set active group
+- `/nick [nickname]` - Display or set your nickname
+- `/safety` - Generate safety number for identity verification
+- `/quit` or `/q` - Exit the application
 - Simply type a message and press Enter to send it to the group
 
 ---
@@ -138,8 +167,14 @@ cargo build --release
 ### Development Build
 
 ```bash
+# Build in debug mode (automatically compiles protobuf files)
 cargo build
+
+# Run with debug logging
 cargo run -- --log-level debug
+
+# Run with trace logging for detailed diagnostics
+cargo run -- --log-level trace
 ```
 
 ### Platform-Specific Notes
@@ -188,10 +223,11 @@ cargo run -- --log-level debug
 
 Agora MLS uses the **kameo** actor framework for concurrent message processing:
 
-- **IdentityActor**: Manages cryptographic identity and key operations
-- **OpenMlsIdentityActor**: Handles MLS protocol state and operations
-- **StateActor**: Coordinates overall application state
+- **IdentityActor**: Manages cryptographic identity and SSH key operations
+- **OpenMlsActor**: Handles MLS protocol state, encryption, and decryption operations
+- **StateActor**: Coordinates overall application state and group management
 - **Processor**: Routes messages between network, CLI, and state actors
+- **NetworkManager**: Handles UDP multicast communication
 
 ### Security Model
 
@@ -269,21 +305,25 @@ cargo run -- --log-level trace
 agora-mls/
 ├── src/
 │   ├── main.rs              # Application entry point
-│   ├── lib.rs               # Library exports
+│   ├── lib.rs               # Library exports and module definitions
 │   ├── app.rs               # Main application coordinator
 │   ├── cli.rs               # Command-line argument parsing
 │   ├── config.rs            # Configuration management
-│   ├── command.rs           # CLI command definitions
-│   ├── processor.rs         # Message processing logic
+│   ├── command.rs           # Interactive command definitions
+│   ├── processor.rs         # Message processing and task coordination
 │   ├── network.rs           # UDP multicast networking
 │   ├── identity_actor.rs    # Cryptographic identity management
 │   ├── openmls_actor.rs     # MLS protocol handler
 │   ├── state_actor.rs       # Application state coordination
 │   ├── safety_number.rs     # Identity verification
-│   └── error.rs             # Error types
+│   ├── error.rs             # Error types
+│   ├── protobuf_wrapper.rs  # Protocol buffer message handling
+│   └── agora_chat.rs        # Generated protobuf code
 ├── proto/
 │   └── chat.proto           # Protocol buffer definitions
-└── Cargo.toml               # Dependencies and metadata
+├── build.rs                 # Build script for protobuf compilation
+├── Cargo.toml               # Dependencies and metadata
+└── Cargo.lock               # Dependency version locks
 ```
 
 ### Running Tests
