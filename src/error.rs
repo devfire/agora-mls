@@ -1,3 +1,6 @@
+use core::convert::Infallible;
+use openmls::group::{CreateMessageError, MergeCommitError, ProcessMessageError};
+use openmls_rust_crypto::MemoryStorageError;
 use prost::DecodeError;
 use std::net::SocketAddr;
 use thiserror::Error;
@@ -36,8 +39,7 @@ pub enum NetworkError {
     InterfaceError { interface: String, message: String },
 }
 
-// Define errors
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)] // Note: Removed Clone, as some inner errors aren't clonable
 pub enum StateActorError {
     #[error("User not found")]
     UserNotFound,
@@ -48,8 +50,8 @@ pub enum StateActorError {
     #[error("Channel not found")]
     ChannelNotFound,
 
-    #[error("Channel creation failed")]
-    GroupCreationFailed,
+    #[error("Failed to create group: {0}")]
+    GroupCreationFailed(#[from] anyhow::Error),
 
     #[error("Safety number generation failed")]
     SafetyNumberGenerationFailed,
@@ -57,11 +59,38 @@ pub enum StateActorError {
     #[error("No active group")]
     NoActiveGroup,
 
+    #[error("Actor communication failed: {0}")]
+    ActorCommError(String),
+
+    #[error("Failed to create MLS message: {0}")]
+    MlsCreateMessageError(#[from] CreateMessageError),
+
+    #[error("Failed to process MLS message: {0}")]
+    MlsProcessMessageError(#[from] ProcessMessageError),
+
+    #[error("Failed to merge staged commit: {0}")]
+    MlsMergeCommitError(#[from] MergeCommitError<Infallible>),
+
+    #[error("Failed to store: {0}")]
+    MlsMergeStorageError(#[from] MergeCommitError<MemoryStorageError>),
+
+    #[error("Failed to convert to/from Protobuf: {0}")]
+    ProtobufConversionError(String),
+
+    #[error("Invalid message received from network")]
+    InvalidReceivedMessage,
+
+    #[error("Failed to decode message as UTF-8: {0}")]
+    InvalidUtf8(#[from] std::string::FromUtf8Error),
+
+    #[error("Feature not implemented")]
+    NotImplemented,
+
+    #[error("Missing verifying key in identity actor")]
+    MissingVerifyingKey,
+
     #[error("Encryption failed")]
     EncryptionFailed,
-
-    #[error("Group state error")]
-    GroupStateError,
 }
 
 #[derive(Error, Debug)]

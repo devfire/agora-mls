@@ -52,21 +52,33 @@ impl KameoMessage<StateActorMessage> for StateActor {
         _ctx: &mut kameo::message::Context<Self, StateActorReply>,
     ) -> Self::Reply {
         // Logic to process the message and generate a reply
+        match self.handle_fallible(msg).await {
+            Ok(reply) => reply,
+            Err(e) => {
+                // Log the detailed error once, here.
+                error!("StateActor operation failed: {}", e);
+                // Return the categorized error to the caller.
+                StateActorReply::StateActorError(e)
+            }
+        }
+    }
+}
+
+impl StateActor {
+    // New function to contain the fallible logic
+    async fn handle_fallible(
+        &mut self,
+        msg: StateActorMessage,
+    ) -> Result<StateActorReply, StateActorError> {
         match msg {
             StateActorMessage::Command(command) => {
                 match command {
                     Command::Create { name } => {
-                        if let Err(e) = self.create_mls_group(&name).await {
-                            error!("Failed to create MLS group '{}': {e}", name);
-                            StateActorReply::StateActorError(StateActorError::GroupCreationFailed)
-                        } else {
-                            debug!("Successfully created MLS group '{}'", name);
-                            StateActorReply::Success
-                        }
+                        self.create_mls_group(&name).await?;
+
+                        debug!("Successfully created MLS group '{}'", name);
+                        Ok(StateActorReply::Success)
                     }
-                    Command::Users => StateActorReply::Success,
-                    Command::Groups => StateActorReply::Success,
-                    Command::Quit => StateActorReply::Success,
                     Command::Nick { nickname } => {
                         if let Some(nick) = nickname {
                             self.identity_actor
@@ -74,8 +86,8 @@ impl KameoMessage<StateActorMessage> for StateActor {
                                     handle_update: Some(nick),
                                 })
                                 .await
-                                .expect("Failed to set identity in IdentityActor.");
-                            StateActorReply::Success
+                                .map_err(|e| StateActorError::ActorCommError(e.to_string()))?;
+                            Ok(StateActorReply::Success)
                         } else {
                             let identity = self
                                 .identity_actor
@@ -83,8 +95,8 @@ impl KameoMessage<StateActorMessage> for StateActor {
                                     handle_update: None,
                                 })
                                 .await
-                                .expect("Failed to get identity from IdentityActor.");
-                            StateActorReply::ChatHandle(identity.handle.clone())
+                                .map_err(|e| StateActorError::ActorCommError(e.to_string()))?;
+                            Ok(StateActorReply::ChatHandle(identity.handle.clone()))
                         }
                     }
                     Command::Safety => {
@@ -99,9 +111,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
                             Ok(reply) => reply.verifying_key,
                             Err(e) => {
                                 error!("Failed to get verifying key from IdentityActor: {e}");
-                                return StateActorReply::StateActorError(
-                                    StateActorError::SafetyNumberGenerationFailed,
-                                );
+                                return Err(StateActorError::MissingVerifyingKey);
                             }
                         };
 
@@ -109,11 +119,9 @@ impl KameoMessage<StateActorMessage> for StateActor {
                         match generate_safety_number(&verifying_key) {
                             Ok(safety_number) => {
                                 debug!("Your safety number is: {safety_number}");
-                                StateActorReply::SafetyNumber(safety_number)
+                                Ok(StateActorReply::SafetyNumber(safety_number))
                             }
-                            Err(_) => StateActorReply::StateActorError(
-                                StateActorError::SafetyNumberGenerationFailed,
-                            ),
+                            Err(_) => Err(StateActorError::SafetyNumberGenerationFailed),
                         }
                     }
                     Command::Group { name: group_name } => {
@@ -121,21 +129,21 @@ impl KameoMessage<StateActorMessage> for StateActor {
                             // User wants to set the active group
                             if self.groups.contains_key(&name) {
                                 self.active_group = Some(name);
-                                StateActorReply::Success
+                                Ok(StateActorReply::Success)
                             } else {
-                                StateActorReply::StateActorError(StateActorError::GroupNotFound)
+                                Err(StateActorError::GroupNotFound)
                             }
                         } else {
                             // User wants to get the current active group
                             if let Some(active_name) = &self.active_group {
-                                StateActorReply::ActiveGroup(Some(active_name.clone()))
+                                Ok(StateActorReply::ActiveGroup(Some(active_name.clone())))
                             } else {
                                 // This should not happen; active_group should always be in groups
-                                StateActorReply::ActiveGroup(None)
+                                Ok(StateActorReply::ActiveGroup(None))
                             }
                         }
                     }
-                    _ => todo!(),
+                    _ => Err(StateActorError::NotImplemented),
                 }
             }
             StateActorMessage::Encrypt(plaintext_payload) => {
@@ -145,145 +153,89 @@ impl KameoMessage<StateActorMessage> for StateActor {
                     .mls_identity_actor
                     .ask(OpenMlsIdentityRequest)
                     .await
-                    .expect("Expected to successfully call the mls actor");
+                    .map_err(|e| StateActorError::ActorCommError(e.to_string()))?;
 
                 // Let's get the active group name first
-                let active_group_name = if let Some(active_group) = &self.active_group {
-                    active_group
-                } else {
-                    debug!("No active group detected.");
-                    return StateActorReply::StateActorError(StateActorError::NoActiveGroup);
-                };
-
-                // Now, armed with the active group, let's get a reference to the MlsGroup
-                let mls_group_ref = if let Some(mls_group) = self.groups.get_mut(active_group_name)
-                {
-                    mls_group
-                } else {
-                    return StateActorReply::StateActorError(StateActorError::GroupNotFound);
-                };
+                let active_group_name = self
+                    .active_group
+                    .as_ref()
+                    .ok_or(StateActorError::NoActiveGroup)?;
+                let mls_group_ref = self
+                    .groups
+                    .get_mut(active_group_name)
+                    .ok_or(StateActorError::GroupNotFound)?;
 
                 // OK, let's try to encrypt the message
-                let mls_msg_out = match mls_group_ref.create_message(
+                let mls_msg_out = mls_group_ref.create_message(
                     &openmls_rust_crypto::OpenMlsRustCrypto::default(),
                     &*mls_identity.signature_keypair,
                     plaintext_payload.encode_to_vec().as_slice(),
-                ) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        // Handle both error types in one shot with a single return
-                        let error = match e {
-                            CreateMessageError::LibraryError(library_error) => {
-                                error!(
-                                    "Library error during message creation: {:?}",
-                                    library_error
-                                );
-                                StateActorError::EncryptionFailed
-                            }
-                            CreateMessageError::GroupStateError(mls_group_state_error) => {
-                                error!(
-                                    "Group state error during message creation: {:?}",
-                                    mls_group_state_error
-                                );
-                                StateActorError::GroupStateError
-                            }
-                        };
-                        return StateActorReply::StateActorError(error);
-                    }
-                };
+                )?;
 
-                let protobuf_message: ProtoMlsMessageOut = mls_msg_out
-                    .try_into()
-                    .expect("Failed to TryFrom on MlsMessageOut");
+                let protobuf_message: ProtoMlsMessageOut =
+                    mls_msg_out.try_into().map_err(|_| {
+                        StateActorError::ProtobufConversionError(
+                            "Failed to convert MlsMessageOut".to_string(),
+                        )
+                    })?;
                 // Return the encrypted wrapped packet for network multicast
-                StateActorReply::EncryptedMessage(protobuf_message)
+                Ok(StateActorReply::EncryptedMessage(protobuf_message))
             }
             StateActorMessage::Decrypt(chat_packet) => {
-                let proto_in: MlsMessageIn = chat_packet
-                    .try_into()
-                    .expect("Should have been able to convert into a protobuf struct");
+                let proto_in: MlsMessageIn = chat_packet.try_into().map_err(|_| {
+                    StateActorError::ProtobufConversionError(
+                        "Failed to convert to MlsMessageIn".to_string(),
+                    )
+                })?;
 
-                // Let's get the active group name first
-                let active_group_name = if let Some(active_group) = &self.active_group {
-                    active_group
-                } else {
-                    debug!("No active group detected.");
-                    return StateActorReply::StateActorError(StateActorError::NoActiveGroup);
-                };
+                let active_group_name = self
+                    .active_group
+                    .as_ref()
+                    .ok_or(StateActorError::NoActiveGroup)?;
+                let mls_group_ref = self
+                    .groups
+                    .get_mut(active_group_name)
+                    .ok_or(StateActorError::GroupNotFound)?;
 
-                // Now, armed with the active group, let's get a reference to the MlsGroup
-                let mls_group_ref = if let Some(mls_group) = self.groups.get_mut(active_group_name)
-                {
-                    mls_group
-                } else {
-                    return StateActorReply::StateActorError(StateActorError::GroupNotFound);
-                };
-
-                // Extract and convert the message body to ProtocolMessage
                 let protocol_message = match proto_in.extract() {
                     MlsMessageBodyIn::PublicMessage(msg) => ProtocolMessage::from(msg),
                     MlsMessageBodyIn::PrivateMessage(msg) => ProtocolMessage::from(msg),
-                    _ => {
-                        error!("Received unsupported message type");
-                        return StateActorReply::StateActorError(StateActorError::EncryptionFailed);
-                    }
+                    _ => return Err(StateActorError::InvalidReceivedMessage),
                 };
 
-                // Process the incoming MLS message to decrypt it
-                let processed_message = match mls_group_ref.process_message(
+                let processed_message = mls_group_ref.process_message(
                     &openmls_rust_crypto::OpenMlsRustCrypto::default(),
                     protocol_message,
-                ) {
-                    Ok(processed) => processed,
-                    Err(e) => {
-                        error!("Failed to process MLS message: {:?}", e);
-                        return StateActorReply::StateActorError(StateActorError::EncryptionFailed);
-                    }
-                };
+                )?; // check out the clean error conversion lol
 
                 // Extract the application message from the processed message
                 match processed_message.into_content() {
                     ProcessedMessageContent::ApplicationMessage(app_msg) => {
-                        // Decode the plaintext bytes into a UTF-8 string
-                        let decrypted_text = match String::from_utf8(app_msg.into_bytes()) {
-                            Ok(text) => text,
-                            Err(e) => {
-                                error!("Failed to decode decrypted message as UTF-8: {:?}", e);
-                                return StateActorReply::StateActorError(
-                                    StateActorError::EncryptionFailed,
-                                );
-                            }
-                        };
-
+                        let decrypted_text = String::from_utf8(app_msg.into_bytes())?; // <-- And another woot woot!
                         debug!("Successfully decrypted message: {}", decrypted_text);
-                        StateActorReply::DecryptedMessage(decrypted_text)
+                        Ok(StateActorReply::DecryptedMessage(decrypted_text))
                     }
                     ProcessedMessageContent::ProposalMessage(_) => {
                         debug!("Received proposal message");
-                        StateActorReply::Success
+                        Err(StateActorError::NotImplemented)
                     }
                     ProcessedMessageContent::ExternalJoinProposalMessage(_) => {
                         debug!("Received external join proposal");
-                        StateActorReply::Success
+                        Err(StateActorError::NotImplemented)
                     }
                     ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
                         debug!("Received staged commit - merging changes");
-                        // Merge the staged commit to update group state
-                        if let Err(e) = mls_group_ref.merge_staged_commit(
+                        mls_group_ref.merge_staged_commit(
                             &openmls_rust_crypto::OpenMlsRustCrypto::default(),
                             *staged_commit,
-                        ) {
-                            error!("Failed to merge staged commit: {:?}", e);
-                            return StateActorReply::StateActorError(StateActorError::GroupStateError);
-                        }
-                        StateActorReply::Success
+                        )?;
+                        Ok(StateActorReply::Success)
                     }
                 }
             }
         }
     }
 }
-
 impl StateActor {
     pub fn new(
         identity_actor: ActorRef<IdentityActor>,
