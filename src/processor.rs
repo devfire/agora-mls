@@ -151,18 +151,13 @@ impl Processor {
                     Ok(reply) => {
                         debug!("Message dispatched successfully.");
                         match reply {
-                            StateActorReply::Status(s) => match s {
-                                // We'll never hit a Status Ok because an Ok result simply a StateActorReply::EncryptedMessage
-                                Ok(_) => unreachable!(),
+                            StateActorReply::StateActorError(e) => {
+                                debug!("ERROR: {e}");
+                                message_sender.send(e.to_string()).await.expect(
+                                    "Unable to send an update from spawn_message_handler_task.",
+                                );
+                            }
 
-                                // However, errors we may encounter, yes.
-                                Err(e) => {
-                                    debug!("ERROR: {e}");
-                                    message_sender.send(e.to_string()).await.expect(
-                                        "Unable to send an update from spawn_message_handler_task.",
-                                    );
-                                }
-                            },
                             StateActorReply::EncryptedMessage(proto_mls_msg_out) => {
                                 // Send the packet over the network
                                 if let Err(e) =
@@ -171,6 +166,7 @@ impl Processor {
                                     error!("Failed to send message over network: {}", e);
                                 }
                             }
+                            // a response to state_actor.ask(StateActorMessage::Encrypt(message)) is either an StateActorReply::EncryptedMessage or an error
                             _ => unreachable!(),
                         }
                     }
@@ -205,15 +201,12 @@ impl Processor {
                                     "Unable to send chat handle from spawn_command_handler_task",
                                 );
                             }
-                            StateActorReply::Status(result) => match result {
-                                Ok(_) => debug!("Command executed successfully."),
-                                Err(e) => {
-                                    debug!("Command processing failed with error: {:?}", e);
-                                    message_sender.send(e.to_string()).await.expect(
-                                        "Unable to send an update from spawn_command_handler_task",
-                                    );
-                                }
-                            },
+                            StateActorReply::StateActorError(e) => {
+                                debug!("Command processing failed with error: {:?}", e);
+                                message_sender.send(e.to_string()).await.expect(
+                                    "Unable to send an update from spawn_command_handler_task",
+                                );
+                            }
                             StateActorReply::Groups(groups) => {
                                 let my_groups = if let Some(groups) = groups {
                                     groups.join(" ")
@@ -282,15 +275,12 @@ impl Processor {
                                         .await
                                         .expect("Unable to send the decrypted msg to display");
                                 }
-                                StateActorReply::Status(s) => match s {
-                                    Ok(_) => unreachable!(),
-                                    Err(e) => {
-                                        message_sender
-                                            .send(e.to_string())
-                                            .await
-                                            .expect("Unable to send the error msg to display");
-                                    }
-                                },
+                                StateActorReply::StateActorError(e) => {
+                                    message_sender
+                                        .send(e.to_string())
+                                        .await
+                                        .expect("Unable to send the error msg to display");
+                                }
                                 _ => unreachable!(),
                             },
                             Err(e) => {

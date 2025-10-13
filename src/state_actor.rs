@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use anyhow::Context;
 use prost::Message;
 use tracing::{debug, error};
 
@@ -33,13 +32,14 @@ pub enum StateActorMessage {
 
 #[derive(Reply)]
 pub enum StateActorReply {
-    Groups(Option<Vec<String>>),         // List of group names, if any
-    Status(Result<(), StateActorError>), // Ok(()) for success, Err(StateActorError) for failure
+    Groups(Option<Vec<String>>),      // List of group names, if any
+    StateActorError(StateActorError), // Err(StateActorError) for failure
     ChatHandle(String),
     SafetyNumber(SafetyNumber),
     ActiveGroup(Option<String>), // Currently active group, if any
     EncryptedMessage(ProtoMlsMessageOut),
     DecryptedMessage(String),
+    Success,
 }
 
 impl KameoMessage<StateActorMessage> for StateActor {
@@ -58,15 +58,15 @@ impl KameoMessage<StateActorMessage> for StateActor {
                     Command::Create { name } => {
                         if let Err(e) = self.create_mls_group(&name).await {
                             error!("Failed to create MLS group '{}': {e}", name);
-                            StateActorReply::Status(Err(StateActorError::GroupCreationFailed))
+                            StateActorReply::StateActorError(StateActorError::GroupCreationFailed)
                         } else {
                             debug!("Successfully created MLS group '{}'", name);
-                            StateActorReply::Status(Ok(()))
+                            StateActorReply::Success
                         }
                     }
-                    Command::Users => StateActorReply::Status(Ok(())),
-                    Command::Groups => StateActorReply::Status(Ok(())),
-                    Command::Quit => StateActorReply::Status(Ok(())),
+                    Command::Users => StateActorReply::Success,
+                    Command::Groups => StateActorReply::Success,
+                    Command::Quit => StateActorReply::Success,
                     Command::Nick { nickname } => {
                         if let Some(nick) = nickname {
                             self.identity_actor
@@ -75,7 +75,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
                                 })
                                 .await
                                 .expect("Failed to set identity in IdentityActor.");
-                            StateActorReply::Status(Ok(()))
+                            StateActorReply::Success
                         } else {
                             let identity = self
                                 .identity_actor
@@ -99,9 +99,9 @@ impl KameoMessage<StateActorMessage> for StateActor {
                             Ok(reply) => reply.verifying_key,
                             Err(e) => {
                                 error!("Failed to get verifying key from IdentityActor: {e}");
-                                return StateActorReply::Status(Err(
+                                return StateActorReply::StateActorError(
                                     StateActorError::SafetyNumberGenerationFailed,
-                                ));
+                                );
                             }
                         };
 
@@ -111,9 +111,9 @@ impl KameoMessage<StateActorMessage> for StateActor {
                                 debug!("Your safety number is: {safety_number}");
                                 StateActorReply::SafetyNumber(safety_number)
                             }
-                            Err(_) => StateActorReply::Status(Err(
+                            Err(_) => StateActorReply::StateActorError(
                                 StateActorError::SafetyNumberGenerationFailed,
-                            )),
+                            ),
                         }
                     }
                     Command::Group { name: group_name } => {
@@ -121,9 +121,9 @@ impl KameoMessage<StateActorMessage> for StateActor {
                             // User wants to set the active group
                             if self.groups.contains_key(&name) {
                                 self.active_group = Some(name);
-                                StateActorReply::Status(Ok(()))
+                                StateActorReply::Success
                             } else {
-                                StateActorReply::Status(Err(StateActorError::GroupNotFound))
+                                StateActorReply::StateActorError(StateActorError::GroupNotFound)
                             }
                         } else {
                             // User wants to get the current active group
@@ -152,7 +152,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
                     active_group
                 } else {
                     debug!("No active group detected.");
-                    return StateActorReply::Status(Err(StateActorError::NoActiveGroup));
+                    return StateActorReply::StateActorError(StateActorError::NoActiveGroup);
                 };
 
                 // Now, armed with the active group, let's get a reference to the MlsGroup
@@ -160,7 +160,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
                 {
                     mls_group
                 } else {
-                    return StateActorReply::Status(Err(StateActorError::GroupNotFound));
+                    return StateActorReply::StateActorError(StateActorError::GroupNotFound);
                 };
 
                 // OK, let's try to encrypt the message
@@ -188,7 +188,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
                                 StateActorError::GroupStateError
                             }
                         };
-                        return StateActorReply::Status(Err(error));
+                        return StateActorReply::StateActorError(error);
                     }
                 };
 
@@ -208,7 +208,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
                     active_group
                 } else {
                     debug!("No active group detected.");
-                    return StateActorReply::Status(Err(StateActorError::NoActiveGroup));
+                    return StateActorReply::StateActorError(StateActorError::NoActiveGroup);
                 };
 
                 // Now, armed with the active group, let's get a reference to the MlsGroup
@@ -216,7 +216,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
                 {
                     mls_group
                 } else {
-                    return StateActorReply::Status(Err(StateActorError::GroupNotFound));
+                    return StateActorReply::StateActorError(StateActorError::GroupNotFound);
                 };
 
                 // Extract and convert the message body to ProtocolMessage
@@ -225,7 +225,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
                     MlsMessageBodyIn::PrivateMessage(msg) => ProtocolMessage::from(msg),
                     _ => {
                         error!("Received unsupported message type");
-                        return StateActorReply::Status(Err(StateActorError::EncryptionFailed));
+                        return StateActorReply::StateActorError(StateActorError::EncryptionFailed);
                     }
                 };
 
@@ -237,7 +237,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
                     Ok(processed) => processed,
                     Err(e) => {
                         error!("Failed to process MLS message: {:?}", e);
-                        return StateActorReply::Status(Err(StateActorError::EncryptionFailed));
+                        return StateActorReply::StateActorError(StateActorError::EncryptionFailed);
                     }
                 };
 
@@ -249,9 +249,9 @@ impl KameoMessage<StateActorMessage> for StateActor {
                             Ok(text) => text,
                             Err(e) => {
                                 error!("Failed to decode decrypted message as UTF-8: {:?}", e);
-                                return StateActorReply::Status(Err(
+                                return StateActorReply::StateActorError(
                                     StateActorError::EncryptionFailed,
-                                ));
+                                );
                             }
                         };
 
@@ -260,11 +260,11 @@ impl KameoMessage<StateActorMessage> for StateActor {
                     }
                     ProcessedMessageContent::ProposalMessage(_) => {
                         debug!("Received proposal message");
-                        StateActorReply::Status(Ok(()))
+                        StateActorReply::Success
                     }
                     ProcessedMessageContent::ExternalJoinProposalMessage(_) => {
                         debug!("Received external join proposal");
-                        StateActorReply::Status(Ok(()))
+                        StateActorReply::Success
                     }
                     ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
                         debug!("Received staged commit - merging changes");
@@ -274,9 +274,9 @@ impl KameoMessage<StateActorMessage> for StateActor {
                             *staged_commit,
                         ) {
                             error!("Failed to merge staged commit: {:?}", e);
-                            return StateActorReply::Status(Err(StateActorError::GroupStateError));
+                            return StateActorReply::StateActorError(StateActorError::GroupStateError);
                         }
-                        StateActorReply::Status(Ok(()))
+                        StateActorReply::Success
                     }
                 }
             }
