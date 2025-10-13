@@ -201,6 +201,12 @@ impl Processor {
                                     "Unable to send chat handle from spawn_command_handler_task",
                                 );
                             }
+                            StateActorReply::Success => {
+                                message_sender.send(String::from("Success.")).await.expect(
+                                    "Unable to send chat handle from spawn_command_handler_task",
+                                );
+                            }
+
                             StateActorReply::StateActorError(e) => {
                                 debug!("Command processing failed with error: {:?}", e);
                                 message_sender.send(e.to_string()).await.expect(
