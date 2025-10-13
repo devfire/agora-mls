@@ -146,30 +146,16 @@ impl Processor {
             while let Some(message) = receiver.recv().await {
                 debug!("Message handler received: {:?}", message);
 
-                // let chat_id = match state_actor
-                //     .ask(StateActorMessage::Command(Command::Nick { nickname: None }))
-                //     .await
-                // {
-                //     Ok(StateActorReply::ChatHandle(handle)) => handle,
-                //     Err(e) => {
-                //         error!("Unable to get chat handle: {}", e);
-                //         return;
-                //     }
-                //     _ => {
-                //         unreachable!("Expected ChatHandle reply")
-                //     }
-                // };
-
                 // Send to the state actor for encryption and multicast
                 match state_actor.ask(StateActorMessage::Encrypt(message)).await {
                     Ok(reply) => {
                         debug!("Message dispatched successfully.");
                         match reply {
-                            StateActorReply::Groups(items) => todo!(),
                             StateActorReply::Status(s) => match s {
-                                Ok(_) => {
-                                    debug!("All's well proceeding with encryption & serialization.")
-                                }
+                                // We'll never hit a Status Ok because an Ok result simply a StateActorReply::EncryptedMessage
+                                Ok(_) => unreachable!(),
+
+                                // However, errors we may encounter, yes.
                                 Err(e) => {
                                     debug!("ERROR: {e}");
                                     message_sender.send(e.to_string()).await.expect(
@@ -177,31 +163,7 @@ impl Processor {
                                     );
                                 }
                             },
-                            StateActorReply::ChatHandle(_) => todo!(),
-                            StateActorReply::SafetyNumber(safety_number) => todo!(),
-                            StateActorReply::ActiveGroup(_) => todo!(),
                             StateActorReply::EncryptedMessage(proto_mls_msg_out) => {
-                                // Get active group info for group_id
-                                // let active_group = match state_actor
-                                //     .ask(StateActorMessage::Command(Command::Group { name: None }))
-                                //     .await
-                                // {
-                                //     Ok(StateActorReply::ActiveGroup(Some(group_name))) => {
-                                //         group_name
-                                //     }
-                                //     Ok(StateActorReply::ActiveGroup(None)) => {
-                                //         error!("No active group found when sending message");
-                                //         return;
-                                //     }
-                                //     Err(e) => {
-                                //         error!("Failed to get active group: {}", e);
-                                //         return;
-                                //     }
-                                //     _ => {
-                                //         unreachable!("Expected ActiveGroup reply")
-                                //     }
-                                // };
-
                                 // Send the packet over the network
                                 if let Err(e) =
                                     network_manager.send_message(proto_mls_msg_out).await
@@ -209,7 +171,7 @@ impl Processor {
                                     error!("Failed to send message over network: {}", e);
                                 }
                             }
-                            StateActorReply::DecryptedMessage(_) => todo!(),
+                            _ => unreachable!(),
                         }
                     }
                     Err(e) => {
@@ -236,41 +198,54 @@ impl Processor {
 
                 // Forward the command to the state actor and await the reply
                 match state_actor.ask(StateActorMessage::Command(command)).await {
-                    Ok(reply) => match reply {
-                        StateActorReply::ChatHandle(handle) => {
-                            println!("Your current chat handle is: {}", handle);
-                        }
-                        StateActorReply::Status(result) => match result {
-                            Ok(_) => debug!("Command executed successfully."),
-                            Err(e) => {
-                                debug!("Command processing failed with error: {:?}", e);
-                                message_sender.send(e.to_string()).await.expect(
-                                    "Unable to send an update from spawn_command_handler_task",
+                    Ok(reply) => {
+                        match reply {
+                            StateActorReply::ChatHandle(handle) => {
+                                message_sender.send(handle).await.expect(
+                                    "Unable to send chat handle from spawn_command_handler_task",
                                 );
                             }
-                        },
-                        StateActorReply::Groups(items) => todo!(),
-                        StateActorReply::SafetyNumber(safety_number) => {
-                            println!("{}", safety_number);
+                            StateActorReply::Status(result) => match result {
+                                Ok(_) => debug!("Command executed successfully."),
+                                Err(e) => {
+                                    debug!("Command processing failed with error: {:?}", e);
+                                    message_sender.send(e.to_string()).await.expect(
+                                        "Unable to send an update from spawn_command_handler_task",
+                                    );
+                                }
+                            },
+                            StateActorReply::Groups(groups) => {
+                                let my_groups = if let Some(groups) = groups {
+                                    groups.join(" ")
+                                } else {
+                                    String::from("No groups created.")
+                                };
+                                message_sender.send(my_groups).await.expect(
+                                    "Unable to send groups from spawn_command_handler_task",
+                                );
+                            }
+                            StateActorReply::SafetyNumber(safety_number) => {
+                                message_sender.send(safety_number.to_string()).await.expect(
+                                    "Unable to send safety_number from spawn_command_handler_task",
+                                );
+                            }
+                            StateActorReply::ActiveGroup(mls_group) => {
+                                let active_group = if let Some(active_group) = mls_group {
+                                    debug!("Active group: {active_group}");
+                                    active_group
+                                } else {
+                                    debug!("No active group");
+                                    crate::error::StateActorError::NoActiveGroup.to_string()
+                                };
+                                message_sender.send(active_group).await.expect(
+                                    "Unable to send responses from spawn_command_handler_task",
+                                );
+                            }
+                            _ => {
+                                unreachable!("We'll never return a msg to a command")
+                            }
                         }
-                        StateActorReply::ActiveGroup(mls_group) => {
-                            let active_group = if let Some(active_group) = mls_group {
-                                debug!("Active group: {active_group}");
-                                active_group
-                            } else {
-                                debug!("No active group");
-                                crate::error::StateActorError::NoActiveGroup.to_string()
-                            };
-                            message_sender
-                                .send(active_group)
-                                .await
-                                .expect("Unable to send responses from spawn_command_handler_task");
-                        }
-                        StateActorReply::EncryptedMessage(_) => {
-                            unreachable!("We'll never return an encrypted msg to a command")
-                        }
-                        StateActorReply::DecryptedMessage(_) => todo!(),
-                    },
+                    }
                     Err(e) => {
                         error!("Failed to send command to state actor: {}", e);
                         break;
@@ -284,6 +259,7 @@ impl Processor {
     pub fn spawn_udp_input_task(
         &self,
         state_actor: ActorRef<StateActor>,
+        message_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         let network_manager = Arc::clone(&self.network_manager);
 
@@ -297,6 +273,33 @@ impl Processor {
 
                         // TODO: Process the packet - forward to state actor or handle appropriately
                         // This is where you would integrate with state_actor to process incoming messages
+
+                        match state_actor.ask(StateActorMessage::Decrypt(packet)).await {
+                            Ok(reply) => match reply {
+                                StateActorReply::DecryptedMessage(message) => {
+                                    message_sender
+                                        .send(message)
+                                        .await
+                                        .expect("Unable to send the decrypted msg to display");
+                                }
+                                StateActorReply::Status(s) => match s {
+                                    Ok(_) => unreachable!(),
+                                    Err(e) => {
+                                        message_sender
+                                            .send(e.to_string())
+                                            .await
+                                            .expect("Unable to send the error msg to display");
+                                    }
+                                },
+                                _ => unreachable!(),
+                            },
+                            Err(e) => {
+                                message_sender
+                                    .send(e.to_string())
+                                    .await
+                                    .expect("Unable to send the error msg to display");
+                            }
+                        }
                     }
                     Err(e) => {
                         error!("Error receiving network message: {}", e);

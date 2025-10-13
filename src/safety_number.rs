@@ -1,6 +1,4 @@
 use ed25519_dalek::VerifyingKey;
-use qrcode::QrCode;
-use qrcode::render::unicode;
 use sha2::{Digest, Sha256};
 
 use crate::error::SafetyNumberError;
@@ -11,8 +9,8 @@ pub struct SafetyNumber {
     pub display_string: String,
     /// The full hash for QR code generation or exact matching.
     pub full_hex: String,
-    /// QR code based on the hash
-    pub qrcode: String,
+    // /// QR code based on the hash
+    // pub qrcode: String,
 }
 
 // Implement Display for SafetyNumber for easy printing
@@ -20,8 +18,8 @@ impl std::fmt::Display for SafetyNumber {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Safety Number: {}\nFull Hash: {}\nQR Code:\n{}",
-            self.display_string, self.full_hex, self.qrcode
+            "Safety Number: {}\nFull Hash: {}",
+            self.display_string, self.full_hex
         )
     }
 }
@@ -64,18 +62,8 @@ pub fn generate_safety_number(
     // Format 2: A full hex string for QR codes.
     let full_hex = hex::encode(hash_result);
 
-    let code = QrCode::new(&full_hex).map_err(|_| SafetyNumberError::QrCodeGenerationFailed)?;
-
-    // Render to a string for console output
-    let image = code
-        .render::<unicode::Dense1x2>()
-        .dark_color(unicode::Dense1x2::Light)
-        .light_color(unicode::Dense1x2::Dark)
-        .build();
-
     Ok(SafetyNumber {
         display_string,
         full_hex,
-        qrcode: image,
     })
 }

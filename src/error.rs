@@ -49,7 +49,7 @@ pub enum StateActorError {
     ChannelNotFound,
 
     #[error("Channel creation failed")]
-    ChannelCreationFailed,
+    GroupCreationFailed,
 
     #[error("Safety number generation failed")]
     SafetyNumberGenerationFailed,

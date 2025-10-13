@@ -1,6 +1,6 @@
-use crate::protobuf_wrapper::ProtoMlsMessageIn;
-use crate::{agora_chat::MlsMessageOut, protobuf_wrapper::ProtoMlsMessageOut};
 use crate::error::NetworkError;
+use crate::protobuf_wrapper::ProtoMlsMessageIn;
+use crate::protobuf_wrapper::ProtoMlsMessageOut;
 
 use prost::Message;
 use socket2::{Domain, Protocol, Socket, Type};
@@ -93,16 +93,18 @@ impl NetworkConfigBuilder {
     /// Build the NetworkConfig with comprehensive validation
     pub fn build(self) -> Result<NetworkConfig> {
         // Extract and validate multicast address
-        let multicast_address = self.multicast_address
-            .ok_or_else(|| NetworkError::MissingRequiredField {
-                field_name: "multicast_address".to_string()
-            })?;
+        let multicast_address =
+            self.multicast_address
+                .ok_or_else(|| NetworkError::MissingRequiredField {
+                    field_name: "multicast_address".to_string(),
+                })?;
 
         // Comprehensive multicast address validation
-        Self::validate_multicast_address(&multicast_address)
-            .map_err(|_| NetworkError::InvalidMulticastAddress {
-                address: multicast_address
-            })?;
+        Self::validate_multicast_address(&multicast_address).map_err(|_| {
+            NetworkError::InvalidMulticastAddress {
+                address: multicast_address,
+            }
+        })?;
 
         // Validate port number
         Self::validate_port(multicast_address.port())?;
@@ -124,30 +126,24 @@ impl NetworkConfigBuilder {
         match address {
             SocketAddr::V4(v4_addr) => {
                 if !v4_addr.ip().is_multicast() {
-                    return Err(NetworkError::InvalidMulticastAddress {
-                        address: *address
-                    });
+                    return Err(NetworkError::InvalidMulticastAddress { address: *address });
                 }
 
                 // Additional validation for multicast range
                 let octets = v4_addr.ip().octets();
                 if octets[0] < 224 || octets[0] > 239 {
-                    return Err(NetworkError::InvalidMulticastAddress {
-                        address: *address
-                    });
+                    return Err(NetworkError::InvalidMulticastAddress { address: *address });
                 }
 
                 Ok(())
-            },
-            SocketAddr::V6(_) => Err(NetworkError::UnsupportedIpv6 {
-                address: *address
-            }),
+            }
+            SocketAddr::V6(_) => Err(NetworkError::UnsupportedIpv6 { address: *address }),
         }
     }
 
     /// Validate buffer size is within acceptable limits
     fn validate_buffer_size(size: usize) -> std::result::Result<(), NetworkError> {
-        const MIN_BUFFER_SIZE: usize = 1024;   // 1KB minimum
+        const MIN_BUFFER_SIZE: usize = 1024; // 1KB minimum
         const MAX_BUFFER_SIZE: usize = 1048576; // 1MB maximum
 
         if size < MIN_BUFFER_SIZE || size > MAX_BUFFER_SIZE {
@@ -192,12 +188,14 @@ impl NetworkManager {
         );
 
         // Create the UDP socket using socket2 for advanced configuration
-        let socket = Self::create_multicast_socket(&config)
-            .context("Failed to create multicast socket - check network configuration and permissions")?;
+        let socket = Self::create_multicast_socket(&config).context(
+            "Failed to create multicast socket - check network configuration and permissions",
+        )?;
 
         // Convert to tokio UdpSocket
-        let tokio_socket = UdpSocket::from_std(socket)
-            .context("Failed to convert to tokio UDP socket - check if another process is using the port")?;
+        let tokio_socket = UdpSocket::from_std(socket).context(
+            "Failed to convert to tokio UDP socket - check if another process is using the port",
+        )?;
 
         let manager = Self {
             socket: tokio_socket,
@@ -217,8 +215,12 @@ impl NetworkManager {
         debug!("Multicast socket created successfully.");
 
         // Enable SO_REUSEADDR to allow multiple agents on the same machine
-        socket.set_reuse_address(true)
+        socket
+            .set_reuse_address(true)
             .context("Failed to set SO_REUSEADDR")?;
+
+        // Disable loopback so we don't receive our own messages
+        socket.set_multicast_loop_v4(false)?;
 
         // On Unix systems, also set SO_REUSEPORT if available for better performance
         #[cfg(unix)]
@@ -233,8 +235,10 @@ impl NetworkManager {
             Ipv4Addr::UNSPECIFIED.into(),
             config.multicast_address.port(),
         );
-        socket.bind(&bind_addr.into())
-            .context(format!("Failed to bind to port {}", config.multicast_address.port()))?;
+        socket.bind(&bind_addr.into()).context(format!(
+            "Failed to bind to port {}",
+            config.multicast_address.port()
+        ))?;
 
         // Join the multicast group
         if let SocketAddr::V4(multicast_v4) = config.multicast_address {
@@ -250,7 +254,8 @@ impl NetworkManager {
                 Ipv4Addr::UNSPECIFIED
             };
 
-            socket.join_multicast_v4(&multicast_ip, &interface_ip)
+            socket
+                .join_multicast_v4(&multicast_ip, &interface_ip)
                 .context(format!("Failed to join multicast group {}", multicast_ip))?;
 
             debug!(
@@ -261,12 +266,14 @@ impl NetworkManager {
             );
         } else {
             return Err(NetworkError::UnsupportedIpv6 {
-                address: config.multicast_address
-            }.into());
+                address: config.multicast_address,
+            }
+            .into());
         }
 
         // Set socket to non-blocking mode for tokio compatibility
-        socket.set_nonblocking(true)
+        socket
+            .set_nonblocking(true)
             .context("Failed to set non-blocking mode")?;
 
         // Convert to std::net::UdpSocket
@@ -282,15 +289,22 @@ impl NetworkManager {
         let mut packet_bytes = Vec::with_capacity(4096);
 
         // Use the Message trait's encode method which is more efficient
-        packet.encode(&mut packet_bytes)
+        packet
+            .encode(&mut packet_bytes)
             .context("Failed to encode packet for sending")?;
 
         self.socket
             .send_to(&packet_bytes, self.multicast_addr)
             .await
-            .context(format!("Failed to send packet to multicast address {}", self.multicast_addr))?;
+            .context(format!(
+                "Failed to send packet to multicast address {}",
+                self.multicast_addr
+            ))?;
 
-        debug!("Successfully sent {} bytes to multicast group", packet_bytes.len());
+        debug!(
+            "Successfully sent {} bytes to multicast group",
+            packet_bytes.len()
+        );
         Ok(())
     }
 
@@ -302,7 +316,8 @@ impl NetworkManager {
         // Pre-allocate buffer with configured size for optimal performance
         let mut buffer = vec![0u8; self.config.buffer_size];
 
-        let (len, remote_addr) = self.socket
+        let (len, remote_addr) = self
+            .socket
             .recv_from(&mut buffer)
             .await
             .context("Failed to receive data from socket")?;
@@ -311,7 +326,10 @@ impl NetworkManager {
         let packet = ProtoMlsMessageIn::decode(&buffer[..len])
             .context(format!("Failed to decode packet from {}", remote_addr))?;
 
-        debug!("Received {} bytes from {} (decoded to packet: {:?})", len, remote_addr, packet);
+        debug!(
+            "Received {} bytes from {} (decoded to packet: {:?})",
+            len, remote_addr, packet
+        );
 
         Ok(packet)
     }

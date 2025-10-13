@@ -42,27 +42,6 @@ pub enum StateActorReply {
     DecryptedMessage(String),
 }
 
-// // implement Display for Reply
-// impl std::fmt::Display for StateActorReply {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             StateActorReply::Groups(Some(channels)) => write!(f, "Channels: {:?}", channels),
-//             StateActorReply::Groups(None) => write!(f, "No channels found"),
-//             StateActorReply::Status(Ok(())) => write!(f, "Operation successful"),
-//             StateActorReply::Status(Err(e)) => write!(f, "Operation failed: {}", e),
-//             StateActorReply::ChatHandle(handle) => write!(f, "{handle}"),
-//             StateActorReply::SafetyNumber(safety_number) => write!(
-//                         f,
-//                         "Safety Number: {}\nFull Hash: {}\nQR Code:\n{}",
-//                         safety_number.display_string, safety_number.full_hex, safety_number.qrcode
-//                     ),
-//             StateActorReply::ActiveGroup(Some(mls_group)) => write!(f, "Active group tbd"),
-//             StateActorReply::ActiveGroup(None) => write!(f, "No active group."),
-// StateActorReply::EncryptedMessage(mls_message_out) => todo!(),
-//         }
-//     }
-// }
-
 impl KameoMessage<StateActorMessage> for StateActor {
     // https://docs.page/tqwewe/kameo/core-concepts/replies
     type Reply = StateActorReply;
@@ -76,16 +55,10 @@ impl KameoMessage<StateActorMessage> for StateActor {
         match msg {
             StateActorMessage::Command(command) => {
                 match command {
-                    Command::Invite {
-                        nick: channel,
-                        password,
-                    } => todo!(),
-                    Command::Leave { channel } => todo!(),
-                    Command::Msg { user, message } => todo!(),
                     Command::Create { name } => {
                         if let Err(e) = self.create_mls_group(&name).await {
                             error!("Failed to create MLS group '{}': {e}", name);
-                            StateActorReply::Status(Err(StateActorError::ChannelCreationFailed))
+                            StateActorReply::Status(Err(StateActorError::GroupCreationFailed))
                         } else {
                             debug!("Successfully created MLS group '{}'", name);
                             StateActorReply::Status(Ok(()))
@@ -162,6 +135,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
                             }
                         }
                     }
+                    _ => todo!(),
                 }
             }
             StateActorMessage::Encrypt(plaintext_payload) => {
@@ -361,37 +335,5 @@ impl StateActor {
         self.active_group = Some(group_name.to_owned());
 
         Ok(())
-    }
-
-    fn get_group_name(group: &openmls::group::MlsGroup) -> anyhow::Result<String> {
-        const GROUP_NAME_EXTENSION_ID: u16 = 13;
-
-        // Get the group context extensions
-        let extensions = group.extensions();
-
-        // Find the specific extension by type
-        let group_name_ext_type = ExtensionType::from(GROUP_NAME_EXTENSION_ID);
-
-        let group_name = extensions
-            .iter()
-            .find_map(|ext| {
-                match ext {
-                    Extension::Unknown(ext_type, unknown_ext) => {
-                        // Check if this is our group name extension
-                        if *ext_type == Into::<u16>::into(group_name_ext_type) {
-                            // Extract the bytes from UnknownExtension
-                            let name_bytes = &unknown_ext.0;
-                            // Convert bytes to String
-                            String::from_utf8(name_bytes.clone()).ok()
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                }
-            })
-            .context("Group name extension not found")?;
-
-        Ok(group_name)
     }
 }

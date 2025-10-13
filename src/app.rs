@@ -64,7 +64,7 @@ impl App {
 
         // Note the distinct lack of .await here - we want to spawn these tasks and let them run concurrently
         // rather than waiting for each to complete before starting the next.
-        let stdin_handle = processor.spawn_stdin_input_task(command_sender, message_sender);
+        let stdin_handle = processor.spawn_stdin_input_task(command_sender, message_sender.clone());
 
         let command_handle = processor.spawn_command_handler_task(
             state_actor_ref.clone(),
@@ -79,7 +79,8 @@ impl App {
         );
 
         // Start the UDP intake task to listen for incoming messages
-        let udp_intake_handle = processor.spawn_udp_input_task(state_actor_ref.clone());
+        let udp_intake_handle =
+            processor.spawn_udp_input_task(state_actor_ref.clone(), message_sender);
 
         // Start the display task to show messages to the user
         let display_handle =
