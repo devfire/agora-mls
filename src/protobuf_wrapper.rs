@@ -1,0 +1,127 @@
+use crate::agora_chat; // Your generated protobuf module
+use crate::error::ProtobufWrapperError;
+use openmls::prelude::{MlsMessageBodyOut, MlsMessageIn, MlsMessageOut, tls_codec::Deserialize};
+use prost::Message;
+use std::ops::Deref;
+
+// Assuming your newtype is defined as:
+pub struct ProtoMlsMessageOut(pub agora_chat::MlsMessageOut);
+
+/// Converts an OpenMLS [`MlsMessageOut`] into a protobuf [`ProtoMlsMessageOut`] wrapper.
+///
+/// This implementation serializes the MLS message to bytes and wraps it in the appropriate
+/// protobuf message structure based on the message body type. It handles all standard MLS
+/// message types:
+/// - PublicMessage: Application messages visible to all group members
+/// - PrivateMessage: Encrypted messages for specific recipients
+/// - Welcome: Messages used to add new members to a group
+/// - GroupInfo: Information about group state and configuration
+/// - KeyPackage: Public keys used for handshake operations
+///
+/// The resulting protobuf message includes the MLS 1.0 protocol version and the serialized
+/// message bytes wrapped in the appropriate message body variant.
+///
+/// # Errors
+/// Returns [`ProtobufWrapperError::SerializationFailed`] if the MLS message cannot be
+/// serialized using the TLS codec.
+impl TryFrom<MlsMessageOut> for ProtoMlsMessageOut {
+    type Error = ProtobufWrapperError;
+
+    fn try_from(mls_message: MlsMessageOut) -> Result<Self, Self::Error> {
+        let mls_message_bytes = mls_message.to_bytes()?;
+
+        let agora_chat_body = match mls_message.body() {
+            MlsMessageBodyOut::PublicMessage(_) => {
+                let inner = agora_chat::PublicMessage {
+                    tls_serialized_public_message: mls_message_bytes,
+                };
+                agora_chat::mls_message_out::Body::PublicMessage(inner)
+            }
+            MlsMessageBodyOut::PrivateMessage(_) => {
+                let inner = agora_chat::PrivateMessage {
+                    tls_serialized_private_message: mls_message_bytes,
+                };
+                agora_chat::mls_message_out::Body::PrivateMessage(inner)
+            }
+            MlsMessageBodyOut::Welcome(_) => {
+                let inner = agora_chat::Welcome {
+                    tls_serialized_welcome_message: mls_message_bytes,
+                };
+                agora_chat::mls_message_out::Body::Welcome(inner)
+            }
+            MlsMessageBodyOut::GroupInfo(_) => {
+                let inner = agora_chat::GroupInfo {
+                    tls_serialized_group_info: mls_message_bytes,
+                };
+                agora_chat::mls_message_out::Body::GroupInfo(inner)
+            }
+            MlsMessageBodyOut::KeyPackage(_) => {
+                let inner = agora_chat::KeyPackage {
+                    tls_serialized_key_package: mls_message_bytes,
+                };
+                agora_chat::mls_message_out::Body::KeyPackage(inner)
+            }
+        };
+
+        let agora_chat_message_out = agora_chat::MlsMessageOut {
+            version: agora_chat::ProtocolVersion::Mls10 as i32,
+            body: Some(agora_chat_body),
+        };
+
+        Ok(Self(agora_chat_message_out))
+    }
+}
+
+impl Deref for ProtoMlsMessageOut {
+    type Target = agora_chat::MlsMessageOut;
+
+    fn deref(&self) -> &Self::Target {
+        // Return a reference to the inner data.
+        &self.0
+    }
+}
+
+// This newtype wraps the same generated struct, but its name
+// clarifies its role as an incoming message.
+#[derive(Debug)]
+pub struct ProtoMlsMessageIn(pub agora_chat::MlsMessageOut);
+
+impl ProtoMlsMessageIn {
+    /// Deserializes a byte slice into our Protobuf wrapper.
+    pub fn decode(bytes: &[u8]) -> Result<Self, ProtobufWrapperError> {
+        let proto_message = agora_chat::MlsMessageOut::decode(bytes)?;
+        Ok(Self(proto_message))
+    }
+}
+
+impl TryFrom<ProtoMlsMessageIn> for MlsMessageIn {
+    type Error = ProtobufWrapperError;
+
+    fn try_from(wrapper: ProtoMlsMessageIn) -> Result<Self, Self::Error> {
+        // The inner proto message from our newtype.
+        let proto_message = wrapper.0;
+
+        // Match on the `oneof` body to get the raw MLS message bytes.
+        let mls_bytes = match proto_message.body {
+            Some(body) => match body {
+                agora_chat::mls_message_out::Body::PublicMessage(m) => {
+                    m.tls_serialized_public_message
+                }
+                agora_chat::mls_message_out::Body::PrivateMessage(m) => {
+                    m.tls_serialized_private_message
+                }
+                agora_chat::mls_message_out::Body::Welcome(m) => m.tls_serialized_welcome_message,
+                agora_chat::mls_message_out::Body::GroupInfo(m) => m.tls_serialized_group_info,
+                agora_chat::mls_message_out::Body::KeyPackage(m) => m.tls_serialized_key_package,
+            },
+            // If the `body` is `None`, the message is invalid.
+            None => return Err(ProtobufWrapperError::MlsMessageBodyInvalid),
+        };
+
+        // Finally, use the extracted bytes to create an MlsMessageIn.
+        // The `?` will convert an MlsMessageError into our ProtoMessageError.
+        let mls_message_in = MlsMessageIn::tls_deserialize(&mut &mls_bytes[..])?;
+
+        Ok(mls_message_in)
+    }
+}

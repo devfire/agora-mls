@@ -1,163 +1,61 @@
-// chat.proto - Protocol Buffer definition for OpenMLS distributed UDP multicast chat
 syntax = "proto3";
 
 package agora_chat;
 
-// Main envelope for all messages transmitted over UDP multicast
-message ChatPacket {
-  string message_id = 1;
-  uint64 timestamp = 2;
-  string sender_id = 3;
-  bytes group_id = 4;
-  
-  oneof message_type {
-    ApplicationMessage application_message = 5;
-    MlsMessage mls_message = 6;
-    KeyPackageMessage key_package = 7;
-    GroupAnnouncement group_announcement = 8;
-    MembershipUpdate membership_update = 9;
-    HeartbeatMessage heartbeat = 10;
-    ErrorMessage error = 11;
-    KeyPackageRequest key_package_request = 12;
-    GroupInfoRequest group_info_request = 13;
+
+// MlsMessageOut serves as a wrapper for messages produced by an OpenMLS group.
+// This is intended for publishing to a multicast topic where subscribers can
+// deserialize this wrapper and then process the inner MLS message payload.
+message MlsMessageOut {
+  // Corresponds to the `version` field in the OpenMLS MlsMessageOut struct.
+  ProtocolVersion version = 1;
+
+  // The body of the message, corresponding to the MlsMessageBodyOut enum.
+  // The 'oneof' constraint ensures that a message can only be one of these types at a time,
+  // perfectly mapping the behavior of the Rust enum.
+  oneof body {
+    PublicMessage public_message = 2;
+    PrivateMessage private_message = 3;
+    Welcome welcome = 4;
+    GroupInfo group_info = 5;
+    KeyPackage key_package = 6;
   }
 }
 
-// Application-level chat messages (encrypted by MLS)
-message ApplicationMessage {
-  string content = 1;
+// Represents the MLS protocol version in use.
+// This should be kept in sync with the versions supported by your OpenMLS implementation.
+enum ProtocolVersion {
+  PROTOCOL_VERSION_UNSPECIFIED = 0;
+  MLS_1_0 = 1;
+  // Add other protocol versions as they become available/supported.
 }
 
-// MLS protocol messages
-message MlsMessage {
-  MlsMessageType message_type = 1;
-  bytes mls_content = 2; // Serialized MLS message
-  uint64 epoch = 3;
+// A wrapper for an MLS PublicMessage.
+message PublicMessage {
+  // The raw bytes of the PublicMessage, serialized using tls_codec.
+  bytes tls_serialized_public_message = 1;
 }
 
-// Key package distribution
-message KeyPackageMessage {
-  string user_id = 1;
-  bytes key_package = 2; // Serialized OpenMLS KeyPackage
-  uint64 expiry_time = 3;
-  repeated string supported_ciphersuites = 4;
+// A wrapper for an MLS PrivateMessage (Ciphertext).
+message PrivateMessage {
+  // The raw bytes of the PrivateMessage, serialized using tls_codec.
+  bytes tls_serialized_private_message = 1;
 }
 
-// Group announcements and discovery
-message GroupAnnouncement {
-  string group_name = 1;
-  string description = 2;
-  string creator_id = 3;
-  uint64 creation_time = 4;
-  uint32 max_members = 5;
-  bool is_public = 6;
-  repeated string tags = 7;
-  bytes group_info = 8; // Serialized MLS GroupInfo
+// A wrapper for an MLS Welcome message.
+message Welcome {
+  // The raw bytes of the Welcome message, serialized using tls_codec.
+  bytes tls_serialized_welcome_message = 1;
 }
 
-// Membership management
-message MembershipUpdate {
-  MembershipAction action = 1;
-  repeated string user_ids = 2;
-  optional string reason = 3;
-  uint64 epoch = 4;
+// A wrapper for an MLS GroupInfo message.
+message GroupInfo {
+  // The raw bytes of the GroupInfo message, serialized using tls_codec.
+  bytes tls_serialized_group_info = 1;
 }
 
-// Heartbeat for presence and connectivity
-message HeartbeatMessage {
-  UserStatus status = 1;
-  uint64 last_seen = 2;
-  optional string status_message = 3;
-  repeated ActiveGroupInfo active_groups = 4;
-}
-
-message ActiveGroupInfo {
-  bytes group_id = 1;
-  uint64 last_activity = 2;
-  uint64 current_epoch = 3;
-}
-
-// Error handling
-message ErrorMessage {
-  ErrorType error_type = 1;
-  string error_message = 2;
-  optional string related_message_id = 3;
-  uint32 error_code = 4;
-}
-
-// Key package request for joining groups
-message KeyPackageRequest {
-  string requesting_user_id = 1;
-  repeated string target_user_ids = 2;
-  optional bytes target_group_id = 3;
-  uint32 requested_count = 4;
-}
-
-// Group info request for discovery
-message GroupInfoRequest {
-  optional bytes group_id = 1;
-  optional string group_name_pattern = 2;
-  repeated string tags = 3;
-  uint32 max_results = 4;
-}
-
-// Enumerations
-enum MediaType {
-  MEDIA_TYPE_UNKNOWN = 0;
-  MEDIA_TYPE_IMAGE = 1;
-  MEDIA_TYPE_VIDEO = 2;
-  MEDIA_TYPE_AUDIO = 3;
-  MEDIA_TYPE_DOCUMENT = 4;
-  MEDIA_TYPE_ARCHIVE = 5;
-}
-
-enum SystemMessageType {
-  SYSTEM_MESSAGE_USER_JOINED = 0;
-  SYSTEM_MESSAGE_USER_LEFT = 1;
-  SYSTEM_MESSAGE_USER_KICKED = 2;
-  SYSTEM_MESSAGE_USER_BANNED = 3;
-  SYSTEM_MESSAGE_GROUP_CREATED = 4;
-  SYSTEM_MESSAGE_GROUP_RENAMED = 5;
-  SYSTEM_MESSAGE_GROUP_DESCRIPTION_CHANGED = 6;
-  SYSTEM_MESSAGE_ADMIN_CHANGED = 7;
-  SYSTEM_MESSAGE_EPOCH_CHANGED = 8;
-}
-
-enum MlsMessageType {
-  MLS_MESSAGE_PROPOSAL = 0;
-  MLS_MESSAGE_COMMIT = 1;
-  MLS_MESSAGE_WELCOME = 2;
-  MLS_MESSAGE_GROUP_INFO = 3;
-  MLS_MESSAGE_KEY_PACKAGE = 4;
-  MLS_MESSAGE_APPLICATION = 5;
-}
-
-enum MembershipAction {
-  MEMBERSHIP_ACTION_ADD = 0;
-  MEMBERSHIP_ACTION_REMOVE = 1;
-  MEMBERSHIP_ACTION_UPDATE = 2;
-  MEMBERSHIP_ACTION_ADMIN_PROMOTE = 3;
-  MEMBERSHIP_ACTION_ADMIN_DEMOTE = 4;
-}
-
-enum UserStatus {
-  USER_STATUS_OFFLINE = 0;
-  USER_STATUS_ONLINE = 1;
-  USER_STATUS_AWAY = 2;
-  USER_STATUS_BUSY = 3;
-  USER_STATUS_INVISIBLE = 4;
-}
-
-enum ErrorType {
-  ERROR_TYPE_UNKNOWN = 0;
-  ERROR_TYPE_NETWORK_ERROR = 1;
-  ERROR_TYPE_PROTOCOL_ERROR = 2;
-  ERROR_TYPE_AUTHENTICATION_ERROR = 3;
-  ERROR_TYPE_AUTHORIZATION_ERROR = 4;
-  ERROR_TYPE_GROUP_NOT_FOUND = 5;
-  ERROR_TYPE_USER_NOT_FOUND = 6;
-  ERROR_TYPE_INVALID_MESSAGE = 7;
-  ERROR_TYPE_CRYPTOGRAPHIC_ERROR = 8;
-  ERROR_TYPE_EPOCH_MISMATCH = 9;
-  ERROR_TYPE_RATE_LIMIT_EXCEEDED = 10;
+// A wrapper for an MLS KeyPackage message.
+message KeyPackage {
+  // The raw bytes of the KeyPackage, serialized using tls_codec.
+  bytes tls_serialized_key_package = 1;
 }

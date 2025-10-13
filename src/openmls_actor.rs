@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::identity_actor::{IdentityActor, IdentityActorMsg};
 
 #[derive(Actor, Debug, Clone)]
-pub struct OpenMlsIdentityActor {
+pub struct OpenMlsActor {
     // client_identity: Vec<u8>, // Public key loaded from SSH ED25519 format
     pub ciphersuite: Ciphersuite,
     pub signature_algorithm: SignatureScheme,
@@ -28,7 +28,7 @@ pub struct OpenMlsIdentityReply {
 }
 
 // Implement the message handling for HelloWorldActor
-impl Message<OpenMlsIdentityRequest> for OpenMlsIdentityActor {
+impl Message<OpenMlsIdentityRequest> for OpenMlsActor {
     type Reply = OpenMlsIdentityReply;
 
     async fn handle(
@@ -45,7 +45,7 @@ impl Message<OpenMlsIdentityRequest> for OpenMlsIdentityActor {
     }
 }
 
-impl OpenMlsIdentityActor {
+impl OpenMlsActor {
     /// Creates a new OpenMLS identity with cryptographic keys and credentials.
     ///
     /// Generates a signature keypair, creates a basic credential from the provided
@@ -96,7 +96,7 @@ impl OpenMlsIdentityActor {
             )
             .expect("Error creating key package bundle.");
 
-        OpenMlsIdentityActor {
+        OpenMlsActor {
             ciphersuite,
             signature_algorithm: ciphersuite.signature_algorithm(),
             mls_key_package,

@@ -1,4 +1,5 @@
 use kameo::prelude::ActorRef;
+
 use rustyline::{DefaultEditor, error::ReadlineError};
 use std::sync::Arc;
 use tracing::{debug, error};
@@ -6,7 +7,7 @@ use tracing::{debug, error};
 use crate::{
     command::Command,
     network,
-    state_actor::{StateActorReply, StateActor},
+    state_actor::{StateActor, StateActorMessage, StateActorReply},
 };
 
 pub struct Processor {
@@ -31,8 +32,8 @@ impl Processor {
     /// Spawn a task to handle user input from stdin.
     pub fn spawn_stdin_input_task(
         &self,
-        state_actor: ActorRef<StateActor>,
-        sender: tokio::sync::mpsc::Sender<Command>,
+        command_sender: tokio::sync::mpsc::Sender<Command>,
+        message_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         // get the chat handle from the state actor
 
@@ -65,22 +66,10 @@ impl Processor {
                 }
             };
 
-            // The problem here is that spawn_blocking runs on a separate thread pool that doesn't have access to the async runtime,
-            // so we can't use .await directly inside it.
-            // Therefore, tokio::runtime::Handle::current().block_on() is to bridge the gap between the blocking and async contexts.
-            let rt = tokio::runtime::Handle::current();
-            let identity_handle = rt.block_on(async {
-                match state_actor
-                    .ask(Command::Nick { nickname: None })
-                    .await
-                    .expect("Unable to get chat handle")
-                {
-                    StateActorReply::ChatHandle(handle) => handle,
-                    _ => panic!("Expected ChatHandle reply"),
-                }
-            });
+            // This just fans out commands & messages to the respective handlers very fast.
+            // Replies either go to the display or to the network outbound
             loop {
-                let readline = rustyline_editor.readline(&format!("{} > ", identity_handle));
+                let readline = rustyline_editor.readline(&format!(" > "));
 
                 match readline {
                     Ok(line) => {
@@ -95,9 +84,9 @@ impl Processor {
                             match Command::parse_command(&line) {
                                 Ok(c) => {
                                     debug!("Command entered: {:?}", c);
-                                    debug!("Attempting to send command to handler task...");
+
                                     // Use blocking_send since we're in a blocking context
-                                    if sender.blocking_send(c).is_err() {
+                                    if command_sender.blocking_send(c).is_err() {
                                         error!(
                                             "Failed to send command: receiver has been dropped."
                                         );
@@ -108,9 +97,25 @@ impl Processor {
                                     if e.kind() == clap::error::ErrorKind::DisplayHelp {
                                         Command::show_custom_help();
                                     } else {
-                                        error!("Command processing failed with {e}");
+                                        debug!("Command processing failed with {e}");
+                                        if message_sender.blocking_send(e.to_string()).is_err() {
+                                            error!(
+                                                "Unable to send error from spawn_stdin_input_task"
+                                            );
+                                            break;
+                                        }
                                     }
                                 }
+                            }
+                        }
+                        // end of if line.starts_with('/')
+                        else {
+                            // not a command, we need to encrypt & ship the msg
+                            if message_sender.blocking_send(line).is_err() {
+                                error!(
+                                    "Failed to send message: spawn_message_handler_task receiver has been dropped."
+                                );
+                                break;
                             }
                         }
                     }
@@ -127,40 +132,205 @@ impl Processor {
         })
     }
 
+    /// Spawn a task to handle messages from stdin and forward them to the network manager.
+    pub fn spawn_message_handler_task(
+        &self,
+        state_actor: ActorRef<StateActor>,
+        mut receiver: tokio::sync::mpsc::Receiver<String>,
+        message_sender: tokio::sync::mpsc::Sender<String>,
+    ) -> tokio::task::JoinHandle<()> {
+        let network_manager = self.network_manager.clone();
+        tokio::spawn(async move {
+            debug!("Starting message handler task.");
+
+            while let Some(message) = receiver.recv().await {
+                debug!("Message handler received: {:?}", message);
+
+                // Send to the state actor for encryption and multicast
+                match state_actor.ask(StateActorMessage::Encrypt(message)).await {
+                    Ok(reply) => {
+                        debug!("Message dispatched successfully.");
+                        match reply {
+                            StateActorReply::StateActorError(e) => {
+                                debug!("ERROR: {e}");
+                                message_sender.send(e.to_string()).await.expect(
+                                    "Unable to send an update from spawn_message_handler_task.",
+                                );
+                            }
+
+                            StateActorReply::EncryptedMessage(proto_mls_msg_out) => {
+                                // Send the packet over the network
+                                if let Err(e) =
+                                    network_manager.send_message(proto_mls_msg_out).await
+                                {
+                                    error!("Failed to send message over network: {}", e);
+                                }
+                            }
+                            // a response to state_actor.ask(StateActorMessage::Encrypt(message)) is either an StateActorReply::EncryptedMessage or an error
+                            _ => unreachable!(),
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "Something horrible happened with the spawn_message_handler_task(): {e} "
+                        )
+                    }
+                }
+            }
+        })
+    }
+
     pub fn spawn_command_handler_task(
         &self,
         state_actor: ActorRef<StateActor>,
         mut receiver: tokio::sync::mpsc::Receiver<Command>,
+        message_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         // let identity_handle = self.identity.handle.clone();
         tokio::spawn(async move {
-            let identity_handle = state_actor
-                .ask(Command::Nick { nickname: None })
-                .await
-                .expect("Unable to get chat handle");
-            debug!(
-                "Starting command handler task for user '{}'",
-                identity_handle
-            );
+            debug!("Starting command handler task.");
             while let Some(command) = receiver.recv().await {
                 debug!("Command handler received command: {:?}", command);
 
                 // Forward the command to the state actor and await the reply
-                // match state_actor.ask(command).await {
-                //     Ok(reply) => {
-                //         debug!("State actor replied with: {:?}", reply);
-                //         // Handle the reply as needed
-                //     }
-                //     Err(e) => {
-                //         error!("Failed to send command to state actor: {}", e);
-                //     }
-                // }
-                // The rest of your command handling logic
+                match state_actor.ask(StateActorMessage::Command(command)).await {
+                    Ok(reply) => {
+                        match reply {
+                            StateActorReply::ChatHandle(handle) => {
+                                message_sender.send(handle).await.expect(
+                                    "Unable to send chat handle from spawn_command_handler_task",
+                                );
+                            }
+                            StateActorReply::StateActorError(e) => {
+                                debug!("Command processing failed with error: {:?}", e);
+                                message_sender.send(e.to_string()).await.expect(
+                                    "Unable to send an update from spawn_command_handler_task",
+                                );
+                            }
+                            StateActorReply::Groups(groups) => {
+                                let my_groups = if let Some(groups) = groups {
+                                    groups.join(" ")
+                                } else {
+                                    String::from("No groups created.")
+                                };
+                                message_sender.send(my_groups).await.expect(
+                                    "Unable to send groups from spawn_command_handler_task",
+                                );
+                            }
+                            StateActorReply::SafetyNumber(safety_number) => {
+                                message_sender.send(safety_number.to_string()).await.expect(
+                                    "Unable to send safety_number from spawn_command_handler_task",
+                                );
+                            }
+                            StateActorReply::ActiveGroup(mls_group) => {
+                                let active_group = if let Some(active_group) = mls_group {
+                                    debug!("Active group: {active_group}");
+                                    active_group
+                                } else {
+                                    debug!("No active group");
+                                    crate::error::StateActorError::NoActiveGroup.to_string()
+                                };
+                                message_sender.send(active_group).await.expect(
+                                    "Unable to send responses from spawn_command_handler_task",
+                                );
+                            }
+                            _ => {
+                                unreachable!("We'll never return a msg to a command")
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to send command to state actor: {}", e);
+                        break;
+                    }
+                }
             }
-            // debug!(
-            //     "Command handler task terminated for agent '{}'",
-            //     identity_handle
-            // );
+        })
+    }
+
+    /// Spawn a task to continuously receive UDP multicast messages.
+    pub fn spawn_udp_input_task(
+        &self,
+        state_actor: ActorRef<StateActor>,
+        message_sender: tokio::sync::mpsc::Sender<String>,
+    ) -> tokio::task::JoinHandle<()> {
+        let network_manager = Arc::clone(&self.network_manager);
+
+        tokio::spawn(async move {
+            debug!("Starting UDP input task to receive multicast messages");
+
+            loop {
+                match network_manager.receive_message().await {
+                    Ok(packet) => {
+                        debug!("Received network packet: {:?}", packet);
+
+                        // TODO: Process the packet - forward to state actor or handle appropriately
+                        // This is where you would integrate with state_actor to process incoming messages
+
+                        match state_actor.ask(StateActorMessage::Decrypt(packet)).await {
+                            Ok(reply) => match reply {
+                                StateActorReply::DecryptedMessage(message) => {
+                                    message_sender
+                                        .send(message)
+                                        .await
+                                        .expect("Unable to send the decrypted msg to display");
+                                }
+                                StateActorReply::StateActorError(e) => {
+                                    message_sender
+                                        .send(e.to_string())
+                                        .await
+                                        .expect("Unable to send the error msg to display");
+                                }
+                                _ => unreachable!(),
+                            },
+                            Err(e) => {
+                                message_sender
+                                    .send(e.to_string())
+                                    .await
+                                    .expect("Unable to send the error msg to display");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error receiving network message: {}", e);
+                        // Continue loop to keep receiving despite errors
+                    }
+                }
+            }
+        })
+    }
+
+    /// Display task for printing messages to console. This task is READ ONLY and does not send messages.
+    pub fn spawn_message_display_task(
+        &self,
+        state_actor: ActorRef<StateActor>,
+        mut receiver: tokio::sync::mpsc::Receiver<String>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            debug!("Starting message display task.");
+            let chat_id = match state_actor
+                .ask(StateActorMessage::Command(Command::Nick { nickname: None }))
+                .await
+            {
+                Ok(StateActorReply::ChatHandle(handle)) => handle,
+                Err(e) => {
+                    error!("Unable to get chat handle: {}", e);
+                    return;
+                }
+                _ => {
+                    unreachable!("Expected ChatHandle reply")
+                }
+            };
+            while let Some(message) = receiver.recv().await {
+                eprint!("\r\x1b[K");
+                eprintln!("{message}");
+                // eprintln!(
+                //     "{} {}: {}",
+                //     message.timestamp, message.display_name, message.content
+                // );
+                eprint!("{} > ", chat_id);
+            }
+            debug!("Message display task ending.");
         })
     }
 }

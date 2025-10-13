@@ -41,13 +41,24 @@ pub enum Command {
     },
     /// List users in current channel
     Users,
-    /// List available channels
-    Channels,
+
+    /// List available groups
+    Groups,
+
+    /// Display information about current active group or set active group
+    Group {
+        /// Set group to active
+        name: Option<String>,
+    },
+
     /// Display or set your nickname
     Nick {
         /// New nickname
         nickname: Option<String>,
     },
+
+    /// Generate the safety number for the current identity
+    Safety,
 
     /// Quit the application
     #[command(alias = "q")]

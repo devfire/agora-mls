@@ -1,146 +1,283 @@
 use std::collections::HashMap;
 
-use anyhow::Context;
-use ed25519_dalek::VerifyingKey;
-use thiserror::Error;
-
+use prost::Message;
 use tracing::{debug, error};
 
-use kameo::prelude::*;
+use kameo::{message::Message as KameoMessage, prelude::*};
 use openmls::prelude::*;
 
-// Define errors
-#[derive(Error, Debug, Clone)]
-pub enum StateActorError {
-    #[error("User not found")]
-    UserNotFound,
-    #[error("Channel not found")]
-    ChannelNotFound,
-
-    #[error("Channel creation failed")]
-    ChannelCreationFailed,
-}
 use crate::{
     command::Command,
+    error::StateActorError,
     identity_actor::{IdentityActor, IdentityActorMsg},
-    openmls_actor::{OpenMlsIdentityActor, OpenMlsIdentityRequest},
+    openmls_actor::{OpenMlsActor, OpenMlsIdentityRequest},
+    protobuf_wrapper::{ProtoMlsMessageIn, ProtoMlsMessageOut},
+    safety_number::{SafetyNumber, generate_safety_number},
 };
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Channel {
-    pub channel_id: String,
-    pub channel_name: String,
-}
-impl std::fmt::Display for Channel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} ({})", self.channel_name, self.channel_id)
-    }
-}
-// Define the state actor
-/// This actor holds the current state of the application.
 #[derive(Actor)]
 pub struct StateActor {
-    users: Vec<VerifyingKey>,
-    membership: HashMap<VerifyingKey, Vec<Channel>>, // Maps handle to channels
+    // membership: HashMap<VerifyingKey, Vec<Group>>, // Maps handle to channels
+    groups: HashMap<String, MlsGroup>, // Maps group name to MlsGroup
+    active_group: Option<String>,      // Currently active group name, if any
     identity_actor: ActorRef<IdentityActor>,
-    mls_identity_actor: ActorRef<OpenMlsIdentityActor>,
+    mls_identity_actor: ActorRef<OpenMlsActor>,
 }
 
-#[derive(Reply, Debug)]
+pub enum StateActorMessage {
+    Command(Command),
+    Encrypt(String),
+    Decrypt(ProtoMlsMessageIn),
+}
+
+#[derive(Reply)]
 pub enum StateActorReply {
-    Users(Option<Vec<String>>),
-    Channels(Option<Vec<String>>),
-    Status(Result<(), StateActorError>), // Ok(()) for success, Err(StateActorError) for failure
+    Groups(Option<Vec<String>>),      // List of group names, if any
+    StateActorError(StateActorError), // Err(StateActorError) for failure
     ChatHandle(String),
+    SafetyNumber(SafetyNumber),
+    ActiveGroup(Option<String>), // Currently active group, if any
+    EncryptedMessage(ProtoMlsMessageOut),
+    DecryptedMessage(String),
+    Success,
 }
 
-// implement Display for Reply
-impl std::fmt::Display for StateActorReply {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StateActorReply::Users(Some(users)) => write!(f, "Users: {:?}", users),
-            StateActorReply::Users(None) => write!(f, "No users found"),
-            StateActorReply::Channels(Some(channels)) => write!(f, "Channels: {:?}", channels),
-            StateActorReply::Channels(None) => write!(f, "No channels found"),
-            StateActorReply::Status(Ok(())) => write!(f, "Operation successful"),
-            StateActorReply::Status(Err(e)) => write!(f, "Operation failed: {}", e),
-            StateActorReply::ChatHandle(handle) => write!(f, "{handle}"),
-        }
-    }
-}
-
-// #[derive(Debug)]
-// pub enum Request {
-//     OriginalCommand(Command), // pass the original command for processing
-//     GetUsers(String),         // get all the users for the given channel
-//     GetChannels,              // get all the channels
-//     QuitChannel(String),      // quit the given channel
-//     CreateChannel(String),    // join the given channel with optional password
-//     ChatHandle,               // get my chat handle
-// }
-
-impl Message<Command> for StateActor {
+impl KameoMessage<StateActorMessage> for StateActor {
     // https://docs.page/tqwewe/kameo/core-concepts/replies
     type Reply = StateActorReply;
 
     async fn handle(
         &mut self,
-        msg: Command,
+        msg: StateActorMessage,
         _ctx: &mut kameo::message::Context<Self, StateActorReply>,
     ) -> Self::Reply {
         // Logic to process the message and generate a reply
-        debug!("CommandHandler received command: {:?}", msg);
         match msg {
-            Command::Invite { nick: channel, password } => todo!(),
-            Command::Leave { channel } => todo!(),
-            Command::Msg { user, message } => todo!(),
-            Command::Create { name } => {
-                if let Err(e) = self.create_mls_group(&name).await {
-                    error!("Failed to create MLS group '{}': {e}", name);
-                    StateActorReply::Status(Err(StateActorError::ChannelCreationFailed))
-                } else {
-                    debug!("Successfully created MLS group '{}'", name);
-                    StateActorReply::Status(Ok(()))
+            StateActorMessage::Command(command) => {
+                match command {
+                    Command::Create { name } => {
+                        if let Err(e) = self.create_mls_group(&name).await {
+                            error!("Failed to create MLS group '{}': {e}", name);
+                            StateActorReply::StateActorError(StateActorError::GroupCreationFailed)
+                        } else {
+                            debug!("Successfully created MLS group '{}'", name);
+                            StateActorReply::Success
+                        }
+                    }
+                    Command::Users => StateActorReply::Success,
+                    Command::Groups => StateActorReply::Success,
+                    Command::Quit => StateActorReply::Success,
+                    Command::Nick { nickname } => {
+                        if let Some(nick) = nickname {
+                            self.identity_actor
+                                .tell(IdentityActorMsg {
+                                    handle_update: Some(nick),
+                                })
+                                .await
+                                .expect("Failed to set identity in IdentityActor.");
+                            StateActorReply::Success
+                        } else {
+                            let identity = self
+                                .identity_actor
+                                .ask(IdentityActorMsg {
+                                    handle_update: None,
+                                })
+                                .await
+                                .expect("Failed to get identity from IdentityActor.");
+                            StateActorReply::ChatHandle(identity.handle.clone())
+                        }
+                    }
+                    Command::Safety => {
+                        // First, let's get the verifyingkey from the identity actor
+                        let verifying_key = match self
+                            .identity_actor
+                            .ask(crate::identity_actor::IdentityActorMsg {
+                                handle_update: None,
+                            })
+                            .await
+                        {
+                            Ok(reply) => reply.verifying_key,
+                            Err(e) => {
+                                error!("Failed to get verifying key from IdentityActor: {e}");
+                                return StateActorReply::StateActorError(
+                                    StateActorError::SafetyNumberGenerationFailed,
+                                );
+                            }
+                        };
+
+                        // Generate the safety number for the user
+                        match generate_safety_number(&verifying_key) {
+                            Ok(safety_number) => {
+                                debug!("Your safety number is: {safety_number}");
+                                StateActorReply::SafetyNumber(safety_number)
+                            }
+                            Err(_) => StateActorReply::StateActorError(
+                                StateActorError::SafetyNumberGenerationFailed,
+                            ),
+                        }
+                    }
+                    Command::Group { name: group_name } => {
+                        if let Some(name) = group_name {
+                            // User wants to set the active group
+                            if self.groups.contains_key(&name) {
+                                self.active_group = Some(name);
+                                StateActorReply::Success
+                            } else {
+                                StateActorReply::StateActorError(StateActorError::GroupNotFound)
+                            }
+                        } else {
+                            // User wants to get the current active group
+                            if let Some(active_name) = &self.active_group {
+                                StateActorReply::ActiveGroup(Some(active_name.clone()))
+                            } else {
+                                // This should not happen; active_group should always be in groups
+                                StateActorReply::ActiveGroup(None)
+                            }
+                        }
+                    }
+                    _ => todo!(),
                 }
             }
-            Command::Users => todo!(),
-            Command::Channels => {
-                todo!()
-                // if self.users.is_empty() {
-                //     Reply::Channels(None)
-                // } else {
-                //     let channel_list: Vec<String> = self
-                //         .users
-                //         .iter()
-                //         .map(|vk| vk.to_bytes())
-                //         .filter_map(|bytes| self.group_names.get(&bytes).cloned())
-                //         .collect();
-                //     if channel_list.is_empty() {
-                //         Reply::Channels(None)
-                //     } else {
-                //         Reply::Channels(Some(channel_list))
-                //     }
-                // }
-            }
-            Command::Quit => todo!(),
-            Command::Nick { nickname } => {
-                if let Some(nick) = nickname {
-                    self.identity_actor
-                        .tell(IdentityActorMsg {
-                            handle_update: Some(nick),
-                        })
-                        .await
-                        .expect("Failed to set identity in IdentityActor.");
-                    StateActorReply::Status(Ok(()))
+            StateActorMessage::Encrypt(plaintext_payload) => {
+                debug!("Encrypting message for transport");
+
+                let mls_identity = self
+                    .mls_identity_actor
+                    .ask(OpenMlsIdentityRequest)
+                    .await
+                    .expect("Expected to successfully call the mls actor");
+
+                // Let's get the active group name first
+                let active_group_name = if let Some(active_group) = &self.active_group {
+                    active_group
                 } else {
-                    let identity = self
-                        .identity_actor
-                        .ask(IdentityActorMsg {
-                            handle_update: None,
-                        })
-                        .await
-                        .expect("Failed to get identity from IdentityActor.");
-                    StateActorReply::ChatHandle(identity.handle.clone())
+                    debug!("No active group detected.");
+                    return StateActorReply::StateActorError(StateActorError::NoActiveGroup);
+                };
+
+                // Now, armed with the active group, let's get a reference to the MlsGroup
+                let mls_group_ref = if let Some(mls_group) = self.groups.get_mut(active_group_name)
+                {
+                    mls_group
+                } else {
+                    return StateActorReply::StateActorError(StateActorError::GroupNotFound);
+                };
+
+                // OK, let's try to encrypt the message
+                let mls_msg_out = match mls_group_ref.create_message(
+                    &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                    &*mls_identity.signature_keypair,
+                    plaintext_payload.encode_to_vec().as_slice(),
+                ) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        // Handle both error types in one shot with a single return
+                        let error = match e {
+                            CreateMessageError::LibraryError(library_error) => {
+                                error!(
+                                    "Library error during message creation: {:?}",
+                                    library_error
+                                );
+                                StateActorError::EncryptionFailed
+                            }
+                            CreateMessageError::GroupStateError(mls_group_state_error) => {
+                                error!(
+                                    "Group state error during message creation: {:?}",
+                                    mls_group_state_error
+                                );
+                                StateActorError::GroupStateError
+                            }
+                        };
+                        return StateActorReply::StateActorError(error);
+                    }
+                };
+
+                let protobuf_message: ProtoMlsMessageOut = mls_msg_out
+                    .try_into()
+                    .expect("Failed to TryFrom on MlsMessageOut");
+                // Return the encrypted wrapped packet for network multicast
+                StateActorReply::EncryptedMessage(protobuf_message)
+            }
+            StateActorMessage::Decrypt(chat_packet) => {
+                let proto_in: MlsMessageIn = chat_packet
+                    .try_into()
+                    .expect("Should have been able to convert into a protobuf struct");
+
+                // Let's get the active group name first
+                let active_group_name = if let Some(active_group) = &self.active_group {
+                    active_group
+                } else {
+                    debug!("No active group detected.");
+                    return StateActorReply::StateActorError(StateActorError::NoActiveGroup);
+                };
+
+                // Now, armed with the active group, let's get a reference to the MlsGroup
+                let mls_group_ref = if let Some(mls_group) = self.groups.get_mut(active_group_name)
+                {
+                    mls_group
+                } else {
+                    return StateActorReply::StateActorError(StateActorError::GroupNotFound);
+                };
+
+                // Extract and convert the message body to ProtocolMessage
+                let protocol_message = match proto_in.extract() {
+                    MlsMessageBodyIn::PublicMessage(msg) => ProtocolMessage::from(msg),
+                    MlsMessageBodyIn::PrivateMessage(msg) => ProtocolMessage::from(msg),
+                    _ => {
+                        error!("Received unsupported message type");
+                        return StateActorReply::StateActorError(StateActorError::EncryptionFailed);
+                    }
+                };
+
+                // Process the incoming MLS message to decrypt it
+                let processed_message = match mls_group_ref.process_message(
+                    &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                    protocol_message,
+                ) {
+                    Ok(processed) => processed,
+                    Err(e) => {
+                        error!("Failed to process MLS message: {:?}", e);
+                        return StateActorReply::StateActorError(StateActorError::EncryptionFailed);
+                    }
+                };
+
+                // Extract the application message from the processed message
+                match processed_message.into_content() {
+                    ProcessedMessageContent::ApplicationMessage(app_msg) => {
+                        // Decode the plaintext bytes into a UTF-8 string
+                        let decrypted_text = match String::from_utf8(app_msg.into_bytes()) {
+                            Ok(text) => text,
+                            Err(e) => {
+                                error!("Failed to decode decrypted message as UTF-8: {:?}", e);
+                                return StateActorReply::StateActorError(
+                                    StateActorError::EncryptionFailed,
+                                );
+                            }
+                        };
+
+                        debug!("Successfully decrypted message: {}", decrypted_text);
+                        StateActorReply::DecryptedMessage(decrypted_text)
+                    }
+                    ProcessedMessageContent::ProposalMessage(_) => {
+                        debug!("Received proposal message");
+                        StateActorReply::Success
+                    }
+                    ProcessedMessageContent::ExternalJoinProposalMessage(_) => {
+                        debug!("Received external join proposal");
+                        StateActorReply::Success
+                    }
+                    ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
+                        debug!("Received staged commit - merging changes");
+                        // Merge the staged commit to update group state
+                        if let Err(e) = mls_group_ref.merge_staged_commit(
+                            &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                            *staged_commit,
+                        ) {
+                            error!("Failed to merge staged commit: {:?}", e);
+                            return StateActorReply::StateActorError(StateActorError::GroupStateError);
+                        }
+                        StateActorReply::Success
+                    }
                 }
             }
         }
@@ -150,11 +287,11 @@ impl Message<Command> for StateActor {
 impl StateActor {
     pub fn new(
         identity_actor: ActorRef<IdentityActor>,
-        mls_identity_actor: ActorRef<OpenMlsIdentityActor>,
+        mls_identity_actor: ActorRef<OpenMlsActor>,
     ) -> Self {
         Self {
-            users: vec![],
-            membership: HashMap::new(),
+            groups: HashMap::new(),
+            active_group: None,
             identity_actor,
             mls_identity_actor,
         }
@@ -191,38 +328,12 @@ impl StateActor {
             mls_identity.credential_with_key,
         )?;
 
+        // Add the group to the HashMap
+        self.groups.insert(group_name.to_owned(), group);
+
+        // Set the active group appropriately
+        self.active_group = Some(group_name.to_owned());
+
         Ok(())
-    }
-
-    fn get_group_name(group: &openmls::group::MlsGroup) -> anyhow::Result<String> {
-        const GROUP_NAME_EXTENSION_ID: u16 = 13;
-
-        // Get the group context extensions
-        let extensions = group.extensions();
-
-        // Find the specific extension by type
-        let group_name_ext_type = ExtensionType::from(GROUP_NAME_EXTENSION_ID);
-
-        let group_name = extensions
-            .iter()
-            .find_map(|ext| {
-                match ext {
-                    Extension::Unknown(ext_type, unknown_ext) => {
-                        // Check if this is our group name extension
-                        if *ext_type == Into::<u16>::into(group_name_ext_type) {
-                            // Extract the bytes from UnknownExtension
-                            let name_bytes = &unknown_ext.0;
-                            // Convert bytes to String
-                            String::from_utf8(name_bytes.clone()).ok()
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                }
-            })
-            .context("Group name extension not found")?;
-
-        Ok(group_name)
     }
 }
