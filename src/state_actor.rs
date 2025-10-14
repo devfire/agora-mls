@@ -37,7 +37,7 @@ pub enum StateActorReply {
     ChatHandle(String),
     SafetyNumber(SafetyNumber),
     ActiveGroup(Option<String>), // Currently active group, if any
-    EncryptedMessage(ProtoMlsMessageOut),
+    MlsMessageOut(ProtoMlsMessageOut),
     DecryptedMessage(String),
     Success,
 }
@@ -52,11 +52,9 @@ impl KameoMessage<StateActorMessage> for StateActor {
         _ctx: &mut kameo::message::Context<Self, StateActorReply>,
     ) -> Self::Reply {
         // Logic to process the message and generate a reply
-        match self.handle_fallible(msg).await {
+        match self.handle_command(msg).await {
             Ok(reply) => reply,
             Err(e) => {
-                // Log the detailed error once, here.
-                error!("StateActor operation failed: {}", e);
                 // Return the categorized error to the caller.
                 StateActorReply::StateActorError(e)
             }
@@ -66,7 +64,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
 
 impl StateActor {
     // New function to contain the fallible logic
-    async fn handle_fallible(
+    async fn handle_command(
         &mut self,
         msg: StateActorMessage,
     ) -> Result<StateActorReply, StateActorError> {
@@ -141,6 +139,18 @@ impl StateActor {
                             }
                         }
                     }
+                    Command::Announce => {
+                        let mls_identity =
+                            self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+
+                        // OpenMLS provides a `From` implementation for this, so `.into()` works perfectly.
+                        let mls_message_out: MlsMessageOut = mls_identity.mls_key_package.into();
+
+                        let proto_key_package: ProtoMlsMessageOut = mls_message_out.try_into()?;
+
+                        // Return the encrypted wrapped packet for network multicast
+                        Ok(StateActorReply::MlsMessageOut(proto_key_package))
+                    }
                     _ => Err(StateActorError::NotImplemented),
                 }
             }
@@ -168,7 +178,7 @@ impl StateActor {
 
                 let protobuf_message: ProtoMlsMessageOut = mls_msg_out.try_into()?;
                 // Return the encrypted wrapped packet for network multicast
-                Ok(StateActorReply::EncryptedMessage(protobuf_message))
+                Ok(StateActorReply::MlsMessageOut(protobuf_message))
             }
             StateActorMessage::Decrypt(chat_packet) => {
                 let proto_in: MlsMessageIn = chat_packet.try_into()?;

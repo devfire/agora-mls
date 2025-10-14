@@ -24,6 +24,7 @@ pub struct IdentityActorMsg {
 pub struct IdentityReply {
     pub handle: String,
     pub verifying_key: VerifyingKey,
+    pub signing_key: SigningKey,
 }
 
 impl Message<IdentityActorMsg> for IdentityActor {
@@ -44,6 +45,7 @@ impl Message<IdentityActorMsg> for IdentityActor {
         IdentityReply {
             handle: self.handle.clone(),
             verifying_key: self.verifying_key,
+            signing_key: self.signing_key.clone()
         }
     }
 }

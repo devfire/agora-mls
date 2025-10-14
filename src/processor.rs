@@ -158,7 +158,7 @@ impl Processor {
                                 );
                             }
 
-                            StateActorReply::EncryptedMessage(proto_mls_msg_out) => {
+                            StateActorReply::MlsMessageOut(proto_mls_msg_out) => {
                                 // Send the packet over the network
                                 if let Err(e) =
                                     network_manager.send_message(proto_mls_msg_out).await
@@ -180,6 +180,7 @@ impl Processor {
         })
     }
 
+    /// We need this because spawn_stdin_input_task cannot send messages directly to the state actor which requires .await.
     pub fn spawn_command_handler_task(
         &self,
         state_actor: ActorRef<StateActor>,
@@ -187,6 +188,7 @@ impl Processor {
         message_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         // let identity_handle = self.identity.handle.clone();
+        let network_manager = Arc::clone(&self.network_manager);
         tokio::spawn(async move {
             debug!("Starting command handler task.");
             while let Some(command) = receiver.recv().await {
@@ -202,7 +204,7 @@ impl Processor {
                                 );
                             }
                             StateActorReply::Success => {
-                                message_sender.send(String::from("Success.")).await.expect(
+                                message_sender.send(String::from("Success!")).await.expect(
                                     "Unable to send chat handle from spawn_command_handler_task",
                                 );
                             }
@@ -240,8 +242,18 @@ impl Processor {
                                     "Unable to send responses from spawn_command_handler_task",
                                 );
                             }
-                            _ => {
-                                unreachable!("We'll never return a msg to a command")
+                            StateActorReply::MlsMessageOut(proto_mls_msg_out) => {
+                                // Send the packet over the network.
+                                // Here, it's not a user entered message because all these are command responses.
+                                // It is a "system" message, like a key package announcement.
+                                if let Err(e) =
+                                    network_manager.send_message(proto_mls_msg_out).await
+                                {
+                                    error!("Failed to send message over network: {}", e);
+                                }
+                            }
+                            StateActorReply::DecryptedMessage(_) => {
+                                unreachable!("We'll never return a decrypted msg to a command")
                             }
                         }
                     }

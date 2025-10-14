@@ -62,19 +62,23 @@ impl OpenMlsActor {
         let ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519;
         let provider = &OpenMlsRustCrypto::default();
 
-        let verifying_key = identity
+        let identity_reply = identity
             .ask(IdentityActorMsg {
                 handle_update: None,
             })
             .await
-            .expect("Failed to get verifying key from IdentityActor.")
-            .verifying_key;
+            .expect("Failed to get verifying key from IdentityActor.");
 
-        let credential = BasicCredential::new(verifying_key.to_bytes().to_vec());
-        let signature_keypair = SignatureKeyPair::new(ciphersuite.signature_algorithm())
-            .expect("Error generating a signature key pair.");
+        let credential = BasicCredential::new(identity_reply.verifying_key.to_bytes().to_vec());
 
-        //     // Store the signature key into the key store so OpenMLS has access to it.
+        // Convert the ed25519_dalek SigningKey into the format OpenMLS expects.
+        let signature_keypair = SignatureKeyPair::from_raw(
+            SignatureScheme::ED25519,
+            identity_reply.signing_key.to_bytes().to_vec(),  // private key
+            identity_reply.verifying_key.to_bytes().to_vec(), // public key
+        );
+
+        // Store the signature key into the key store so OpenMLS has access to it.
         signature_keypair
             .store(provider.storage())
             .expect("Error storing signature keys in key store.");
