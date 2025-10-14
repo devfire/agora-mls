@@ -60,6 +60,9 @@ pub enum Command {
     /// Generate the safety number for the current identity
     Safety,
 
+    /// Send out the mls key package
+    Announce,
+
     /// Quit the application
     #[command(alias = "q")]
     Quit,

@@ -85,8 +85,7 @@ impl StateActor {
                                 .tell(IdentityActorMsg {
                                     handle_update: Some(nick),
                                 })
-                                .await
-                                .map_err(|e| StateActorError::ActorCommError(e.to_string()))?;
+                                .await?;
                             Ok(StateActorReply::Success)
                         } else {
                             let identity = self
@@ -94,8 +93,7 @@ impl StateActor {
                                 .ask(IdentityActorMsg {
                                     handle_update: None,
                                 })
-                                .await
-                                .map_err(|e| StateActorError::ActorCommError(e.to_string()))?;
+                                .await?;
                             Ok(StateActorReply::ChatHandle(identity.handle.clone()))
                         }
                     }
@@ -149,11 +147,7 @@ impl StateActor {
             StateActorMessage::Encrypt(plaintext_payload) => {
                 debug!("Encrypting message for transport");
 
-                let mls_identity = self
-                    .mls_identity_actor
-                    .ask(OpenMlsIdentityRequest)
-                    .await
-                    .map_err(|e| StateActorError::ActorCommError(e.to_string()))?;
+                let mls_identity = self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
 
                 // Let's get the active group name first
                 let active_group_name = self
@@ -172,21 +166,12 @@ impl StateActor {
                     plaintext_payload.encode_to_vec().as_slice(),
                 )?;
 
-                let protobuf_message: ProtoMlsMessageOut =
-                    mls_msg_out.try_into().map_err(|_| {
-                        StateActorError::ProtobufConversionError(
-                            "Failed to convert MlsMessageOut".to_string(),
-                        )
-                    })?;
+                let protobuf_message: ProtoMlsMessageOut = mls_msg_out.try_into()?;
                 // Return the encrypted wrapped packet for network multicast
                 Ok(StateActorReply::EncryptedMessage(protobuf_message))
             }
             StateActorMessage::Decrypt(chat_packet) => {
-                let proto_in: MlsMessageIn = chat_packet.try_into().map_err(|_| {
-                    StateActorError::ProtobufConversionError(
-                        "Failed to convert to MlsMessageIn".to_string(),
-                    )
-                })?;
+                let proto_in: MlsMessageIn = chat_packet.try_into()?;
 
                 let active_group_name = self
                     .active_group
@@ -211,7 +196,7 @@ impl StateActor {
                 // Extract the application message from the processed message
                 match processed_message.into_content() {
                     ProcessedMessageContent::ApplicationMessage(app_msg) => {
-                        let decrypted_text = String::from_utf8(app_msg.into_bytes())?; // <-- And another woot woot!
+                        let decrypted_text = String::from_utf8(app_msg.into_bytes())?; // And another woot woot!
                         debug!("Successfully decrypted message: {}", decrypted_text);
                         Ok(StateActorReply::DecryptedMessage(decrypted_text))
                     }
