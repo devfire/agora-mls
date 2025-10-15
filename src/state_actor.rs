@@ -4,7 +4,7 @@ use prost::Message;
 use tracing::{debug, error};
 
 use kameo::{message::Message as KameoMessage, prelude::*};
-use openmls::prelude::*;
+use openmls::prelude::{tls_codec::Deserialize, *};
 
 use crate::{
     command::Command,
@@ -22,6 +22,7 @@ pub struct StateActor {
     active_group: Option<String>,      // Currently active group name, if any
     identity_actor: ActorRef<IdentityActor>,
     mls_identity_actor: ActorRef<OpenMlsActor>,
+    key_packages: HashMap<String, KeyPackageIn>, // username -> KeyPackageIn cache
 }
 
 pub enum StateActorMessage {
@@ -142,13 +143,26 @@ impl StateActor {
                         let mls_identity =
                             self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
 
-                        // OpenMLS provides a `From` implementation for this, so `.into()` works perfectly.
+                        // Get username from identity actor
+                        let identity_reply = self
+                            .identity_actor
+                            .ask(IdentityActorMsg {
+                                handle_update: None,
+                            })
+                            .await?;
+
+                        // Convert KeyPackage to bytes
                         let mls_message_out: MlsMessageOut = mls_identity.mls_key_package.into();
+                        let key_package_bytes = mls_message_out.to_bytes()?;
 
-                        let proto_key_package: ProtoMlsMessageOut = mls_message_out.try_into()?;
+                        // Create UserAnnouncement protobuf (consistent with try_into pattern)
+                        let proto_message = Self::create_user_announcement(
+                            identity_reply.handle,
+                            key_package_bytes,
+                        );
 
-                        // Return the encrypted wrapped packet for network multicast
-                        Ok(StateActorReply::MlsMessageOut(proto_key_package))
+                        // Return wrapped message for network multicast
+                        Ok(StateActorReply::MlsMessageOut(proto_message))
                     }
                     _ => Err(StateActorError::NotImplemented),
                 }
@@ -180,6 +194,34 @@ impl StateActor {
                 Ok(StateActorReply::MlsMessageOut(protobuf_message))
             }
             StateActorMessage::Decrypt(chat_packet) => {
+                // Check if this is a UserAnnouncement at the protobuf level first
+                if let Some(crate::agora_chat::mls_message_out::Body::UserAnnouncement(
+                    user_announcement,
+                )) = &chat_packet.0.body
+                {
+                    debug!(
+                        "Received UserAnnouncement from: {}",
+                        user_announcement.username
+                    );
+
+                    // Deserialize the KeyPackage from the announcement
+
+                    let key_package = KeyPackageIn::tls_deserialize(
+                        &mut &user_announcement.tls_serialized_key_package[..],
+                    )?;
+
+                    // Cache the KeyPackage by username
+                    debug!(
+                        "Caching KeyPackage for user: {}",
+                        user_announcement.username
+                    );
+                    self.key_packages
+                        .insert(user_announcement.username.clone(), key_package);
+
+                    return Ok(StateActorReply::Success);
+                }
+
+                // For other message types, convert to MlsMessageIn
                 let proto_in: MlsMessageIn = chat_packet.try_into()?;
 
                 match proto_in.extract() {
@@ -262,16 +304,7 @@ impl StateActor {
                             }
                         }
                     }
-                    MlsMessageBodyIn::KeyPackage(_key_package) => {
-                        debug!("Received KeyPackage - new member wants to join group");
-                        // For now, return NotImplemented until you implement the full join workflow
-                        // TODO: Implement proper KeyPackage handling:
-                        // 1. Validate the KeyPackage
-                        // 2. Add member to group with add_members()
-                        // 3. Generate Welcome message
-                        // 4. Return the Welcome message to send back to the new member
-                        Err(StateActorError::NotImplemented)
-                    }
+
                     MlsMessageBodyIn::Welcome(_welcome) => {
                         debug!("Received Welcome message - processing group join");
                         // Handle Welcome messages for joining groups
@@ -282,6 +315,26 @@ impl StateActor {
                 }
             }
         }
+    }
+
+    /// Helper method to create a UserAnnouncement protobuf message
+    fn create_user_announcement(
+        username: String,
+        key_package_bytes: Vec<u8>,
+    ) -> ProtoMlsMessageOut {
+        let user_announcement = crate::agora_chat::UserAnnouncement {
+            username,
+            tls_serialized_key_package: key_package_bytes,
+        };
+
+        let proto_message = crate::agora_chat::MlsMessageOut {
+            version: crate::agora_chat::ProtocolVersion::Mls10 as i32,
+            body: Some(crate::agora_chat::mls_message_out::Body::UserAnnouncement(
+                user_announcement,
+            )),
+        };
+
+        ProtoMlsMessageOut(proto_message)
     }
 }
 impl StateActor {
@@ -294,6 +347,7 @@ impl StateActor {
             active_group: None,
             identity_actor,
             mls_identity_actor,
+            key_packages: HashMap::new(),
         }
     }
 

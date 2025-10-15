@@ -6,14 +6,18 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 clap = { version = "4.5.48", features = ["derive"] }
+ed25519 = { version = "2.2.3", features = ["pkcs8"] }
 ed25519-dalek = { version = "2.2.0", features = ["signature"] }
 hex = "0.4.3"
 kameo = "0.18.0"
 openmls = "0.7.0"
 openmls_basic_credential = "0.4.0"
 openmls_rust_crypto = "0.4.0"
+pem = "3.0.6"
+pkcs8 = "0.10.2"
 prost = "0.14.1"
 qrcode = "0.14.1"
+rcgen = "0.14.5"
 rpassword = "7.4.0"
 rustyline = "17.0.1"
 sha2 = "0.10.9"

@@ -299,7 +299,7 @@ impl Processor {
                                         .await
                                         .expect("Unable to send the error msg to display");
                                 }
-                                
+
                                 _ => unreachable!(),
                             },
                             Err(e) => {

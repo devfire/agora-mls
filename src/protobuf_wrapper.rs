@@ -55,11 +55,10 @@ impl TryFrom<MlsMessageOut> for ProtoMlsMessageOut {
                 };
                 agora_chat::mls_message_out::Body::GroupInfo(inner)
             }
+            // Note: KeyPackage is sent via UserAnnouncement, not as a standalone message
             MlsMessageBodyOut::KeyPackage(_) => {
-                let inner = agora_chat::KeyPackage {
-                    tls_serialized_key_package: mls_message_bytes,
-                };
-                agora_chat::mls_message_out::Body::KeyPackage(inner)
+                // This shouldn't happen in normal flow - KeyPackages are wrapped in UserAnnouncement
+                panic!("Bare KeyPackage should not be sent - use UserAnnouncement instead")
             }
         };
 
@@ -112,7 +111,11 @@ impl TryFrom<ProtoMlsMessageIn> for MlsMessageIn {
                 }
                 agora_chat::mls_message_out::Body::Welcome(m) => m.tls_serialized_welcome_message,
                 agora_chat::mls_message_out::Body::GroupInfo(m) => m.tls_serialized_group_info,
-                agora_chat::mls_message_out::Body::KeyPackage(m) => m.tls_serialized_key_package,
+                agora_chat::mls_message_out::Body::UserAnnouncement(m) => {
+                    // UserAnnouncement contains both username and key package
+                    // Extract the KeyPackage bytes for MLS processing
+                    m.tls_serialized_key_package
+                }
             },
             // If the `body` is `None`, the message is invalid.
             None => return Err(ProtobufWrapperError::MlsMessageBodyInvalid),

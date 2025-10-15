@@ -90,8 +90,17 @@ pub enum StateActorError {
     #[error("Missing verifying key in identity actor")]
     MissingVerifyingKey,
 
+    #[error("Invalid credential or missing required extension")]
+    InvalidCredential,
+
     #[error("Encryption failed")]
     EncryptionFailed,
+
+    #[error("Failed to serialize MLS message to bytes")]
+    MlsMessageError(#[from] openmls::framing::errors::MlsMessageError),
+
+    #[error("Failed to deserialize MLS packet")]
+    MlsDeserializeError(#[from] openmls::prelude::Error)
 }
 
 #[derive(Error, Debug)]
@@ -125,7 +134,9 @@ impl<M> From<SendError<M>> for StateActorError {
             SendError::ActorNotRunning(_) => "Actor not running".to_string(),
             SendError::ActorStopped => "Actor stopped before a reply could be received".to_string(),
             SendError::MailboxFull(_) => "Actor's mailbox is full".to_string(),
-            SendError::HandlerError(_) => "An error occurred within the actor's handler".to_string(),
+            SendError::HandlerError(_) => {
+                "An error occurred within the actor's handler".to_string()
+            }
             SendError::Timeout(_) => "Timed out waiting for a reply".to_string(),
         };
         StateActorError::ActorCommError(err_msg)

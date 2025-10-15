@@ -89,8 +89,7 @@ impl OpenMlsActor {
             signature_key: signature_keypair.public().into(),
         };
 
-        // let mut mls_key_package = OpenMlsIdentity::new();
-
+        // Build KeyPackage (username will be sent via protobuf wrapper, not extension)
         let mls_key_package = KeyPackage::builder()
             .build(
                 ciphersuite,
