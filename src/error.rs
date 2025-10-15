@@ -67,7 +67,7 @@ pub enum StateActorError {
     MlsCreateMessageError(#[from] CreateMessageError),
 
     #[error("Failed to process MLS message: {0}")]
-    MlsProcessMessageError(#[from] ProcessMessageError),
+    MlsProcessMessageError(#[from] ProcessMessageError<Infallible>),
 
     #[error("Failed to merge staged commit: {0}")]
     MlsMergeCommitError(#[from] MergeCommitError<Infallible>),
@@ -100,7 +100,10 @@ pub enum StateActorError {
     MlsMessageError(#[from] openmls::framing::errors::MlsMessageError),
 
     #[error("Failed to deserialize MLS packet")]
-    MlsDeserializeError(#[from] openmls::prelude::Error)
+    MlsDeserializeError(#[from] openmls::prelude::Error),
+
+    #[error("Failed to store MLS")]
+    MlsProcessStorageError(#[from] ProcessMessageError<MemoryStorageError>)
 }
 
 #[derive(Error, Debug)]

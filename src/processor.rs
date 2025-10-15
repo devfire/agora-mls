@@ -282,9 +282,6 @@ impl Processor {
                     Ok(packet) => {
                         debug!("Received network packet: {:?}", packet);
 
-                        // TODO: Process the packet - forward to state actor or handle appropriately
-                        // This is where you would integrate with state_actor to process incoming messages
-
                         match state_actor.ask(StateActorMessage::Decrypt(packet)).await {
                             Ok(reply) => match reply {
                                 StateActorReply::DecryptedMessage(message) => {
