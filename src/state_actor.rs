@@ -52,7 +52,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
         _ctx: &mut kameo::message::Context<Self, StateActorReply>,
     ) -> Self::Reply {
         // Logic to process the message and generate a reply
-        match self.handle_command(msg).await {
+        match self.handle_state_actor_message(msg).await {
             Ok(reply) => reply,
             Err(e) => {
                 // Return the categorized error to the caller.
@@ -63,8 +63,7 @@ impl KameoMessage<StateActorMessage> for StateActor {
 }
 
 impl StateActor {
-    // New function to contain the fallible logic
-    async fn handle_command(
+    async fn handle_state_actor_message(
         &mut self,
         msg: StateActorMessage,
     ) -> Result<StateActorReply, StateActorError> {
@@ -183,49 +182,103 @@ impl StateActor {
             StateActorMessage::Decrypt(chat_packet) => {
                 let proto_in: MlsMessageIn = chat_packet.try_into()?;
 
-                let active_group_name = self
-                    .active_group
-                    .as_ref()
-                    .ok_or(StateActorError::NoActiveGroup)?;
-                let mls_group_ref = self
-                    .groups
-                    .get_mut(active_group_name)
-                    .ok_or(StateActorError::GroupNotFound)?;
-
-                let protocol_message = match proto_in.extract() {
-                    MlsMessageBodyIn::PublicMessage(msg) => ProtocolMessage::from(msg),
-                    MlsMessageBodyIn::PrivateMessage(msg) => ProtocolMessage::from(msg),
-                    _ => return Err(StateActorError::InvalidReceivedMessage),
-                };
-
-                let processed_message = mls_group_ref.process_message(
-                    &openmls_rust_crypto::OpenMlsRustCrypto::default(),
-                    protocol_message,
-                )?; // check out the clean error conversion lol
-
-                // Extract the application message from the processed message
-                match processed_message.into_content() {
-                    ProcessedMessageContent::ApplicationMessage(app_msg) => {
-                        let decrypted_text = String::from_utf8(app_msg.into_bytes())?; // And another woot woot!
-                        debug!("Successfully decrypted message: {}", decrypted_text);
-                        Ok(StateActorReply::DecryptedMessage(decrypted_text))
-                    }
-                    ProcessedMessageContent::ProposalMessage(_) => {
-                        debug!("Received proposal message");
-                        Err(StateActorError::NotImplemented)
-                    }
-                    ProcessedMessageContent::ExternalJoinProposalMessage(_) => {
-                        debug!("Received external join proposal");
-                        Err(StateActorError::NotImplemented)
-                    }
-                    ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
-                        debug!("Received staged commit - merging changes");
-                        mls_group_ref.merge_staged_commit(
+                match proto_in.extract() {
+                    MlsMessageBodyIn::PublicMessage(msg) => {
+                        let active_group_name = self
+                            .active_group
+                            .as_ref()
+                            .ok_or(StateActorError::NoActiveGroup)?;
+                        let mls_group_ref = self
+                            .groups
+                            .get_mut(active_group_name)
+                            .ok_or(StateActorError::GroupNotFound)?;
+                        let protocol_message = ProtocolMessage::from(msg);
+                        let processed_message = mls_group_ref.process_message(
                             &openmls_rust_crypto::OpenMlsRustCrypto::default(),
-                            *staged_commit,
+                            protocol_message,
                         )?;
-                        Ok(StateActorReply::Success)
+
+                        match processed_message.into_content() {
+                            ProcessedMessageContent::ApplicationMessage(app_msg) => {
+                                let decrypted_text = String::from_utf8(app_msg.into_bytes())?;
+                                debug!("Successfully decrypted message: {}", decrypted_text);
+                                Ok(StateActorReply::DecryptedMessage(decrypted_text))
+                            }
+                            ProcessedMessageContent::ProposalMessage(_) => {
+                                debug!("Received proposal message");
+                                Err(StateActorError::NotImplemented)
+                            }
+                            ProcessedMessageContent::ExternalJoinProposalMessage(_) => {
+                                debug!("Received external join proposal");
+                                Err(StateActorError::NotImplemented)
+                            }
+                            ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
+                                debug!("Received staged commit - merging changes");
+                                mls_group_ref.merge_staged_commit(
+                                    &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                                    *staged_commit,
+                                )?;
+                                Ok(StateActorReply::Success)
+                            }
+                        }
                     }
+                    MlsMessageBodyIn::PrivateMessage(msg) => {
+                        let protocol_message = ProtocolMessage::from(msg);
+
+                        let active_group_name = self
+                            .active_group
+                            .as_ref()
+                            .ok_or(StateActorError::NoActiveGroup)?;
+                        let mls_group_ref = self
+                            .groups
+                            .get_mut(active_group_name)
+                            .ok_or(StateActorError::GroupNotFound)?;
+                        let processed_message = mls_group_ref.process_message(
+                            &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                            protocol_message,
+                        )?;
+
+                        match processed_message.into_content() {
+                            ProcessedMessageContent::ApplicationMessage(app_msg) => {
+                                let decrypted_text = String::from_utf8(app_msg.into_bytes())?;
+                                debug!("Successfully decrypted message: {}", decrypted_text);
+                                Ok(StateActorReply::DecryptedMessage(decrypted_text))
+                            }
+                            ProcessedMessageContent::ProposalMessage(_) => {
+                                debug!("Received proposal message");
+                                Err(StateActorError::NotImplemented)
+                            }
+                            ProcessedMessageContent::ExternalJoinProposalMessage(_) => {
+                                debug!("Received external join proposal");
+                                Err(StateActorError::NotImplemented)
+                            }
+                            ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
+                                debug!("Received staged commit - merging changes");
+                                mls_group_ref.merge_staged_commit(
+                                    &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                                    *staged_commit,
+                                )?;
+                                Ok(StateActorReply::Success)
+                            }
+                        }
+                    }
+                    MlsMessageBodyIn::KeyPackage(_key_package) => {
+                        debug!("Received KeyPackage - new member wants to join group");
+                        // For now, return NotImplemented until you implement the full join workflow
+                        // TODO: Implement proper KeyPackage handling:
+                        // 1. Validate the KeyPackage
+                        // 2. Add member to group with add_members()
+                        // 3. Generate Welcome message
+                        // 4. Return the Welcome message to send back to the new member
+                        Err(StateActorError::NotImplemented)
+                    }
+                    MlsMessageBodyIn::Welcome(_welcome) => {
+                        debug!("Received Welcome message - processing group join");
+                        // Handle Welcome messages for joining groups
+                        // This would be used when this client wants to join a group
+                        Err(StateActorError::NotImplemented)
+                    }
+                    _ => Err(StateActorError::InvalidReceivedMessage),
                 }
             }
         }
