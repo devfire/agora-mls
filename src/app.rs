@@ -75,12 +75,12 @@ impl App {
         let message_handle = processor.spawn_message_handler_task(
             state_actor_ref.clone(),
             message_receiver,
-            display_sender,
+            display_sender.clone(),
         );
 
         // Start the UDP intake task to listen for incoming messages
         let udp_intake_handle =
-            processor.spawn_udp_input_task(state_actor_ref.clone(), message_sender);
+            processor.spawn_udp_input_task(state_actor_ref.clone(), display_sender.clone());
 
         // Start the display task to show messages to the user
         let display_handle =

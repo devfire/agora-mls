@@ -151,9 +151,12 @@ impl StateActor {
                             })
                             .await?;
 
-                        // Convert KeyPackage to bytes
-                        let mls_message_out: MlsMessageOut = mls_identity.mls_key_package.into();
-                        let key_package_bytes = mls_message_out.to_bytes()?;
+                        // Serialize KeyPackage directly (not wrapped in MlsMessageOut)
+                        use openmls::prelude::tls_codec::Serialize;
+                        let key_package_bytes = mls_identity.mls_key_package
+                            .key_package()
+                            .tls_serialize_detached()
+                            .map_err(|_e| StateActorError::EncryptionFailed)?;
 
                         // Create UserAnnouncement protobuf (consistent with try_into pattern)
                         let proto_message = Self::create_user_announcement(

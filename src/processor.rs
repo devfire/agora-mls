@@ -270,7 +270,7 @@ impl Processor {
     pub fn spawn_udp_input_task(
         &self,
         state_actor: ActorRef<StateActor>,
-        message_sender: tokio::sync::mpsc::Sender<String>,
+        display_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         let network_manager = Arc::clone(&self.network_manager);
 
@@ -288,22 +288,28 @@ impl Processor {
                         match state_actor.ask(StateActorMessage::Decrypt(packet)).await {
                             Ok(reply) => match reply {
                                 StateActorReply::DecryptedMessage(message) => {
-                                    message_sender
+                                    display_sender
                                         .send(message)
                                         .await
                                         .expect("Unable to send the decrypted msg to display");
                                 }
                                 StateActorReply::StateActorError(e) => {
-                                    message_sender
+                                    display_sender
                                         .send(e.to_string())
                                         .await
                                         .expect("Unable to send the error msg to display");
+                                }
+                                StateActorReply::Success => {
+                                    display_sender
+                                        .send("Success!".to_string())
+                                        .await
+                                        .expect("This really needs to be mapped to a proper error");
                                 }
 
                                 _ => unreachable!(),
                             },
                             Err(e) => {
-                                message_sender
+                                display_sender
                                     .send(e.to_string())
                                     .await
                                     .expect("Unable to send the error msg to display");
