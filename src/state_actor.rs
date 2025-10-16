@@ -4,7 +4,7 @@ use prost::Message;
 use tracing::{debug, error};
 
 use kameo::{message::Message as KameoMessage, prelude::*};
-use openmls::prelude::*;
+use openmls::prelude::{tls_codec::Deserialize, *};
 
 use crate::{
     command::Command,
@@ -22,6 +22,7 @@ pub struct StateActor {
     active_group: Option<String>,      // Currently active group name, if any
     identity_actor: ActorRef<IdentityActor>,
     mls_identity_actor: ActorRef<OpenMlsActor>,
+    key_packages: HashMap<String, KeyPackageIn>, // composite_key -> KeyPackageIn cache
 }
 
 pub enum StateActorMessage {
@@ -37,9 +38,10 @@ pub enum StateActorReply {
     ChatHandle(String),
     SafetyNumber(SafetyNumber),
     ActiveGroup(Option<String>), // Currently active group, if any
-    EncryptedMessage(ProtoMlsMessageOut),
+    MlsMessageOut(ProtoMlsMessageOut),
     DecryptedMessage(String),
-    Success,
+    Users(Option<Vec<String>>),
+    Success(String),
 }
 
 impl KameoMessage<StateActorMessage> for StateActor {
@@ -52,11 +54,9 @@ impl KameoMessage<StateActorMessage> for StateActor {
         _ctx: &mut kameo::message::Context<Self, StateActorReply>,
     ) -> Self::Reply {
         // Logic to process the message and generate a reply
-        match self.handle_fallible(msg).await {
+        match self.handle_state_actor_message(msg).await {
             Ok(reply) => reply,
             Err(e) => {
-                // Log the detailed error once, here.
-                error!("StateActor operation failed: {}", e);
                 // Return the categorized error to the caller.
                 StateActorReply::StateActorError(e)
             }
@@ -65,8 +65,51 @@ impl KameoMessage<StateActorMessage> for StateActor {
 }
 
 impl StateActor {
-    // New function to contain the fallible logic
-    async fn handle_fallible(
+    /// Extract a short fingerprint from a KeyPackageIn's credential
+    /// Returns the first 8 characters of the hex-encoded public key
+    fn get_key_fingerprint_from_in(
+        key_package_in: &KeyPackageIn,
+    ) -> Result<String, StateActorError> {
+        // Use the public API to get the signature key
+        let signature_key = key_package_in.unverified_credential().signature_key;
+        let public_key_bytes = signature_key.as_slice();
+
+        // Create a short hex fingerprint (first 8 chars = 4 bytes)
+        let fingerprint = hex::encode(&public_key_bytes[..4]);
+
+        Ok(fingerprint)
+    }
+
+    /// Build a composite key from username and KeyPackageIn
+    fn build_composite_key_from_in(
+        username: &str,
+        key_package_in: &KeyPackageIn,
+    ) -> Result<String, StateActorError> {
+        let fingerprint = Self::get_key_fingerprint_from_in(key_package_in)?;
+        Ok(format!("{}@{}", username, fingerprint))
+    }
+
+    /// List all composite keys matching a username prefix
+    /// Example: list_keys_for_username("john") returns ["john@a1b2c3d4", "john@9f8e7d6c"]
+    pub fn list_keys_for_username(&self, username: &str) -> Vec<String> {
+        let prefix = format!("{}@", username);
+        self.key_packages
+            .keys()
+            .filter(|key| key.starts_with(&prefix))
+            .cloned()
+            .collect()
+    }
+
+    /// Parse a composite key into username and fingerprint
+    pub fn parse_composite_key(composite_key: &str) -> Result<(String, String), StateActorError> {
+        let parts: Vec<&str> = composite_key.split('@').collect();
+        if parts.len() != 2 {
+            return Err(StateActorError::InvalidCompositeKey);
+        }
+        Ok((parts[0].to_string(), parts[1].to_string()))
+    }
+
+    async fn handle_state_actor_message(
         &mut self,
         msg: StateActorMessage,
     ) -> Result<StateActorReply, StateActorError> {
@@ -77,7 +120,7 @@ impl StateActor {
                         self.create_mls_group(&name).await?;
 
                         debug!("Successfully created MLS group '{}'", name);
-                        Ok(StateActorReply::Success)
+                        Ok(StateActorReply::Success("Successfully created MLS group".to_string()))
                     }
                     Command::Nick { nickname } => {
                         if let Some(nick) = nickname {
@@ -85,17 +128,15 @@ impl StateActor {
                                 .tell(IdentityActorMsg {
                                     handle_update: Some(nick),
                                 })
-                                .await
-                                .map_err(|e| StateActorError::ActorCommError(e.to_string()))?;
-                            Ok(StateActorReply::Success)
+                                .await?;
+                            Ok(StateActorReply::Success("Current nick found.".to_string()))
                         } else {
                             let identity = self
                                 .identity_actor
                                 .ask(IdentityActorMsg {
                                     handle_update: None,
                                 })
-                                .await
-                                .map_err(|e| StateActorError::ActorCommError(e.to_string()))?;
+                                .await?;
                             Ok(StateActorReply::ChatHandle(identity.handle.clone()))
                         }
                     }
@@ -129,7 +170,7 @@ impl StateActor {
                             // User wants to set the active group
                             if self.groups.contains_key(&name) {
                                 self.active_group = Some(name);
-                                Ok(StateActorReply::Success)
+                                Ok(StateActorReply::Success("Group found.".to_string()))
                             } else {
                                 Err(StateActorError::GroupNotFound)
                             }
@@ -143,17 +184,49 @@ impl StateActor {
                             }
                         }
                     }
+                    Command::Announce => {
+                        let mls_identity =
+                            self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+
+                        // Get username from identity actor
+                        let identity_reply = self
+                            .identity_actor
+                            .ask(IdentityActorMsg {
+                                handle_update: None,
+                            })
+                            .await?;
+
+                        // Serialize KeyPackage directly (not wrapped in MlsMessageOut)
+                        use openmls::prelude::tls_codec::Serialize;
+                        let key_package_bytes = mls_identity
+                            .mls_key_package
+                            .key_package()
+                            .tls_serialize_detached()
+                            .map_err(|_e| StateActorError::EncryptionFailed)?;
+
+                        // Create UserAnnouncement protobuf (consistent with try_into pattern)
+                        let proto_message = Self::create_user_announcement(
+                            identity_reply.handle,
+                            key_package_bytes,
+                        );
+
+                        // Return wrapped message for network multicast
+                        Ok(StateActorReply::MlsMessageOut(proto_message))
+                    }
+
+                    Command::Users => {
+                        // get they hashmap keys as the Vec
+                        let known_users: Vec<String> = self.key_packages.keys().cloned().collect();
+                        Ok(StateActorReply::Users(Some(known_users)))
+                    }
+
                     _ => Err(StateActorError::NotImplemented),
                 }
             }
             StateActorMessage::Encrypt(plaintext_payload) => {
                 debug!("Encrypting message for transport");
 
-                let mls_identity = self
-                    .mls_identity_actor
-                    .ask(OpenMlsIdentityRequest)
-                    .await
-                    .map_err(|e| StateActorError::ActorCommError(e.to_string()))?;
+                let mls_identity = self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
 
                 // Let's get the active group name first
                 let active_group_name = self
@@ -172,68 +245,164 @@ impl StateActor {
                     plaintext_payload.encode_to_vec().as_slice(),
                 )?;
 
-                let protobuf_message: ProtoMlsMessageOut =
-                    mls_msg_out.try_into().map_err(|_| {
-                        StateActorError::ProtobufConversionError(
-                            "Failed to convert MlsMessageOut".to_string(),
-                        )
-                    })?;
+                let protobuf_message: ProtoMlsMessageOut = mls_msg_out.try_into()?;
                 // Return the encrypted wrapped packet for network multicast
-                Ok(StateActorReply::EncryptedMessage(protobuf_message))
+                Ok(StateActorReply::MlsMessageOut(protobuf_message))
             }
             StateActorMessage::Decrypt(chat_packet) => {
-                let proto_in: MlsMessageIn = chat_packet.try_into().map_err(|_| {
-                    StateActorError::ProtobufConversionError(
-                        "Failed to convert to MlsMessageIn".to_string(),
-                    )
-                })?;
+                // Check if this is a UserAnnouncement at the protobuf level first
+                if let Some(crate::agora_chat::mls_message_out::Body::UserAnnouncement(
+                    user_announcement,
+                )) = &chat_packet.0.body
+                {
+                    debug!(
+                        "Received UserAnnouncement from: {}",
+                        user_announcement.username
+                    );
 
-                let active_group_name = self
-                    .active_group
-                    .as_ref()
-                    .ok_or(StateActorError::NoActiveGroup)?;
-                let mls_group_ref = self
-                    .groups
-                    .get_mut(active_group_name)
-                    .ok_or(StateActorError::GroupNotFound)?;
+                    // Deserialize the KeyPackage from the announcement
+                    let key_package_in = KeyPackageIn::tls_deserialize(
+                        &mut &user_announcement.tls_serialized_key_package[..],
+                    )?;
 
-                let protocol_message = match proto_in.extract() {
-                    MlsMessageBodyIn::PublicMessage(msg) => ProtocolMessage::from(msg),
-                    MlsMessageBodyIn::PrivateMessage(msg) => ProtocolMessage::from(msg),
-                    _ => return Err(StateActorError::InvalidReceivedMessage),
-                };
+                    // For now, we'll work with KeyPackageIn directly
+                    // Validation happens when users are added to groups
+                    // Build composite key (username@fingerprint)
+                    let composite_key = Self::build_composite_key_from_in(
+                        &user_announcement.username,
+                        &key_package_in,
+                    )?;
 
-                let processed_message = mls_group_ref.process_message(
-                    &openmls_rust_crypto::OpenMlsRustCrypto::default(),
-                    protocol_message,
-                )?; // check out the clean error conversion lol
-
-                // Extract the application message from the processed message
-                match processed_message.into_content() {
-                    ProcessedMessageContent::ApplicationMessage(app_msg) => {
-                        let decrypted_text = String::from_utf8(app_msg.into_bytes())?; // <-- And another woot woot!
-                        debug!("Successfully decrypted message: {}", decrypted_text);
-                        Ok(StateActorReply::DecryptedMessage(decrypted_text))
+                    // Check if this is a duplicate announcement
+                    if self.key_packages.contains_key(&composite_key) {
+                        debug!(
+                            "Received duplicate announcement for: {} (overwriting)",
+                            composite_key
+                        );
+                    } else {
+                        debug!("Caching new KeyPackage for: {}", composite_key);
                     }
-                    ProcessedMessageContent::ProposalMessage(_) => {
-                        debug!("Received proposal message");
-                        Err(StateActorError::NotImplemented)
-                    }
-                    ProcessedMessageContent::ExternalJoinProposalMessage(_) => {
-                        debug!("Received external join proposal");
-                        Err(StateActorError::NotImplemented)
-                    }
-                    ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
-                        debug!("Received staged commit - merging changes");
-                        mls_group_ref.merge_staged_commit(
+
+                    // Store with composite key
+                    self.key_packages.insert(composite_key, key_package_in);
+
+                    return Ok(StateActorReply::Success("Received a new user announcement.".to_string()));
+                }
+
+                // For other message types, convert to MlsMessageIn
+                let proto_in: MlsMessageIn = chat_packet.try_into()?;
+
+                match proto_in.extract() {
+                    MlsMessageBodyIn::PublicMessage(msg) => {
+                        let active_group_name = self
+                            .active_group
+                            .as_ref()
+                            .ok_or(StateActorError::NoActiveGroup)?;
+                        let mls_group_ref = self
+                            .groups
+                            .get_mut(active_group_name)
+                            .ok_or(StateActorError::GroupNotFound)?;
+                        let protocol_message = ProtocolMessage::from(msg);
+                        let processed_message = mls_group_ref.process_message(
                             &openmls_rust_crypto::OpenMlsRustCrypto::default(),
-                            *staged_commit,
+                            protocol_message,
                         )?;
-                        Ok(StateActorReply::Success)
+
+                        match processed_message.into_content() {
+                            ProcessedMessageContent::ApplicationMessage(app_msg) => {
+                                let decrypted_text = String::from_utf8(app_msg.into_bytes())?;
+                                debug!("Successfully decrypted message: {}", decrypted_text);
+                                Ok(StateActorReply::DecryptedMessage(decrypted_text))
+                            }
+                            ProcessedMessageContent::ProposalMessage(_) => {
+                                debug!("Received proposal message");
+                                Err(StateActorError::NotImplemented)
+                            }
+                            ProcessedMessageContent::ExternalJoinProposalMessage(_) => {
+                                debug!("Received external join proposal");
+                                Err(StateActorError::NotImplemented)
+                            }
+                            ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
+                                debug!("Received staged commit - merging changes");
+                                mls_group_ref.merge_staged_commit(
+                                    &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                                    *staged_commit,
+                                )?;
+                                Ok(StateActorReply::Success("Staged commit received.".to_string()))
+                            }
+                        }
                     }
+                    MlsMessageBodyIn::PrivateMessage(msg) => {
+                        let protocol_message = ProtocolMessage::from(msg);
+
+                        let active_group_name = self
+                            .active_group
+                            .as_ref()
+                            .ok_or(StateActorError::NoActiveGroup)?;
+                        let mls_group_ref = self
+                            .groups
+                            .get_mut(active_group_name)
+                            .ok_or(StateActorError::GroupNotFound)?;
+                        let processed_message = mls_group_ref.process_message(
+                            &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                            protocol_message,
+                        )?;
+
+                        match processed_message.into_content() {
+                            ProcessedMessageContent::ApplicationMessage(app_msg) => {
+                                let decrypted_text = String::from_utf8(app_msg.into_bytes())?;
+                                debug!("Successfully decrypted message: {}", decrypted_text);
+                                Ok(StateActorReply::DecryptedMessage(decrypted_text))
+                            }
+                            ProcessedMessageContent::ProposalMessage(_) => {
+                                debug!("Received proposal message");
+                                Err(StateActorError::NotImplemented)
+                            }
+                            ProcessedMessageContent::ExternalJoinProposalMessage(_) => {
+                                debug!("Received external join proposal");
+                                Err(StateActorError::NotImplemented)
+                            }
+                            ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
+                                debug!("Received staged commit - merging changes");
+                                mls_group_ref.merge_staged_commit(
+                                    &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                                    *staged_commit,
+                                )?;
+                                Ok(StateActorReply::Success("Staged commit received.".to_string()))
+                            }
+                        }
+                    }
+
+                    MlsMessageBodyIn::Welcome(_welcome) => {
+                        debug!("Received Welcome message - processing group join");
+                        // Handle Welcome messages for joining groups
+                        // This would be used when this client wants to join a group
+                        Err(StateActorError::NotImplemented)
+                    }
+                    _ => Err(StateActorError::InvalidReceivedMessage),
                 }
             }
         }
+    }
+
+    /// Helper method to create a UserAnnouncement protobuf message
+    fn create_user_announcement(
+        username: String,
+        key_package_bytes: Vec<u8>,
+    ) -> ProtoMlsMessageOut {
+        let user_announcement = crate::agora_chat::UserAnnouncement {
+            username,
+            tls_serialized_key_package: key_package_bytes,
+        };
+
+        let proto_message = crate::agora_chat::MlsMessageOut {
+            version: crate::agora_chat::ProtocolVersion::Mls10 as i32,
+            body: Some(crate::agora_chat::mls_message_out::Body::UserAnnouncement(
+                user_announcement,
+            )),
+        };
+
+        ProtoMlsMessageOut(proto_message)
     }
 }
 impl StateActor {
@@ -246,6 +415,7 @@ impl StateActor {
             active_group: None,
             identity_actor,
             mls_identity_actor,
+            key_packages: HashMap::new(),
         }
     }
 
@@ -287,5 +457,24 @@ impl StateActor {
         self.active_group = Some(group_name.to_owned());
 
         Ok(())
+    }
+}
+
+/// Test helper to demonstrate the composite key functionality
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_composite_key() {
+        let (username, fingerprint) = StateActor::parse_composite_key("alice@9f8e7d6c").unwrap();
+        assert_eq!(username, "alice");
+        assert_eq!(fingerprint, "9f8e7d6c");
+
+        // Test invalid format
+        assert!(StateActor::parse_composite_key("alice").is_err()); // No @ at all
+        assert!(StateActor::parse_composite_key("alice@@9f8e7d6c").is_err()); // Multiple @
+        assert!(StateActor::parse_composite_key("9f8e7d6c").is_err()); // No @ at all (just fingerprint)
+        assert!(StateActor::parse_composite_key("").is_err()); // Empty string
     }
 }

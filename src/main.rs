@@ -10,7 +10,7 @@ async fn main() -> anyhow::Result<()> {
     let args: ChatArgs = ChatArgs::parse();
 
     // Set up logging with the specified log level and filter out noisy logs from rustyline
-    let filter_directives = format!("{}{}", args.log_level, ",rustyline=info");
+    let filter_directives = format!("{}{}", args.log_level, ",openmls=info,rustyline=info");
 
     // Initialize tracing subscriber for logging (needed for validation errors)
     // a bit of hack but rustyline cannot go to debug, it pumps out mad amount of info.

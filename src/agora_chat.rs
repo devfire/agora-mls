@@ -10,7 +10,7 @@ pub struct MlsMessageOut {
     /// The body of the message, corresponding to the MlsMessageBodyOut enum.
     /// The 'oneof' constraint ensures that a message can only be one of these types at a time,
     /// perfectly mapping the behavior of the Rust enum.
-    #[prost(oneof = "mls_message_out::Body", tags = "2, 3, 4, 5, 6")]
+    #[prost(oneof = "mls_message_out::Body", tags = "2, 3, 4, 5, 7")]
     pub body: ::core::option::Option<mls_message_out::Body>,
 }
 /// Nested message and enum types in `MlsMessageOut`.
@@ -28,8 +28,8 @@ pub mod mls_message_out {
         Welcome(super::Welcome),
         #[prost(message, tag = "5")]
         GroupInfo(super::GroupInfo),
-        #[prost(message, tag = "6")]
-        KeyPackage(super::KeyPackage),
+        #[prost(message, tag = "7")]
+        UserAnnouncement(super::UserAnnouncement),
     }
 }
 /// A wrapper for an MLS PublicMessage.
@@ -60,11 +60,15 @@ pub struct GroupInfo {
     #[prost(bytes = "vec", tag = "1")]
     pub tls_serialized_group_info: ::prost::alloc::vec::Vec<u8>,
 }
-/// A wrapper for an MLS KeyPackage message.
+/// A user announcement that includes both the KeyPackage and username.
+/// This allows username-based discovery while keeping the KeyPackage intact.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct KeyPackage {
+pub struct UserAnnouncement {
+    /// The user's chosen display name/handle
+    #[prost(string, tag = "1")]
+    pub username: ::prost::alloc::string::String,
     /// The raw bytes of the KeyPackage, serialized using tls_codec.
-    #[prost(bytes = "vec", tag = "1")]
+    #[prost(bytes = "vec", tag = "2")]
     pub tls_serialized_key_package: ::prost::alloc::vec::Vec<u8>,
 }
 /// Represents the MLS protocol version in use.

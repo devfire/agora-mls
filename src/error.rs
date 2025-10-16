@@ -1,4 +1,5 @@
 use core::convert::Infallible;
+use kameo::error::SendError;
 use openmls::group::{CreateMessageError, MergeCommitError, ProcessMessageError};
 use openmls_rust_crypto::MemoryStorageError;
 use prost::DecodeError;
@@ -66,7 +67,7 @@ pub enum StateActorError {
     MlsCreateMessageError(#[from] CreateMessageError),
 
     #[error("Failed to process MLS message: {0}")]
-    MlsProcessMessageError(#[from] ProcessMessageError),
+    MlsProcessMessageError(#[from] ProcessMessageError<Infallible>),
 
     #[error("Failed to merge staged commit: {0}")]
     MlsMergeCommitError(#[from] MergeCommitError<Infallible>),
@@ -75,7 +76,7 @@ pub enum StateActorError {
     MlsMergeStorageError(#[from] MergeCommitError<MemoryStorageError>),
 
     #[error("Failed to convert to/from Protobuf: {0}")]
-    ProtobufConversionError(String),
+    ProtobufConversionError(#[from] ProtobufWrapperError),
 
     #[error("Invalid message received from network")]
     InvalidReceivedMessage,
@@ -89,8 +90,26 @@ pub enum StateActorError {
     #[error("Missing verifying key in identity actor")]
     MissingVerifyingKey,
 
+    #[error("Invalid credential or missing required extension")]
+    InvalidCredential,
+
     #[error("Encryption failed")]
     EncryptionFailed,
+
+    #[error("Failed to serialize MLS message to bytes")]
+    MlsMessageError(#[from] openmls::framing::errors::MlsMessageError),
+
+    #[error("Failed to deserialize MLS packet")]
+    MlsDeserializeError(#[from] openmls::prelude::Error),
+
+    #[error("Failed to store MLS")]
+    MlsProcessStorageError(#[from] ProcessMessageError<MemoryStorageError>),
+
+    #[error("Failed to validate KeyPackage")]
+    KeyPackageValidationFailed,
+
+    #[error("Invalid composite key format (expected username@fingerprint)")]
+    InvalidCompositeKey,
 }
 
 #[derive(Error, Debug)]
@@ -114,4 +133,21 @@ pub enum ProtobufWrapperError {
 
     #[error("OpenMLS failed to process the message")]
     MlsMessageInvalid(#[from] openmls::framing::errors::MlsMessageError),
+}
+
+// Add this implementation at the bottom of the file
+// Replace the previous `impl From<KameoError>` with this generic one
+impl<M> From<SendError<M>> for StateActorError {
+    fn from(err: SendError<M>) -> Self {
+        let err_msg = match err {
+            SendError::ActorNotRunning(_) => "Actor not running".to_string(),
+            SendError::ActorStopped => "Actor stopped before a reply could be received".to_string(),
+            SendError::MailboxFull(_) => "Actor's mailbox is full".to_string(),
+            SendError::HandlerError(_) => {
+                "An error occurred within the actor's handler".to_string()
+            }
+            SendError::Timeout(_) => "Timed out waiting for a reply".to_string(),
+        };
+        StateActorError::ActorCommError(err_msg)
+    }
 }
