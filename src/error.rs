@@ -103,7 +103,13 @@ pub enum StateActorError {
     MlsDeserializeError(#[from] openmls::prelude::Error),
 
     #[error("Failed to store MLS")]
-    MlsProcessStorageError(#[from] ProcessMessageError<MemoryStorageError>)
+    MlsProcessStorageError(#[from] ProcessMessageError<MemoryStorageError>),
+
+    #[error("Failed to validate KeyPackage")]
+    KeyPackageValidationFailed,
+
+    #[error("Invalid composite key format (expected username@fingerprint)")]
+    InvalidCompositeKey,
 }
 
 #[derive(Error, Debug)]

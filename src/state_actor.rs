@@ -22,7 +22,7 @@ pub struct StateActor {
     active_group: Option<String>,      // Currently active group name, if any
     identity_actor: ActorRef<IdentityActor>,
     mls_identity_actor: ActorRef<OpenMlsActor>,
-    key_packages: HashMap<String, KeyPackageIn>, // username -> KeyPackageIn cache
+    key_packages: HashMap<String, KeyPackageIn>, // composite_key -> KeyPackageIn cache
 }
 
 pub enum StateActorMessage {
@@ -40,7 +40,8 @@ pub enum StateActorReply {
     ActiveGroup(Option<String>), // Currently active group, if any
     MlsMessageOut(ProtoMlsMessageOut),
     DecryptedMessage(String),
-    Success,
+    Users(Option<Vec<String>>),
+    Success(String),
 }
 
 impl KameoMessage<StateActorMessage> for StateActor {
@@ -64,6 +65,50 @@ impl KameoMessage<StateActorMessage> for StateActor {
 }
 
 impl StateActor {
+    /// Extract a short fingerprint from a KeyPackageIn's credential
+    /// Returns the first 8 characters of the hex-encoded public key
+    fn get_key_fingerprint_from_in(
+        key_package_in: &KeyPackageIn,
+    ) -> Result<String, StateActorError> {
+        // Use the public API to get the signature key
+        let signature_key = key_package_in.unverified_credential().signature_key;
+        let public_key_bytes = signature_key.as_slice();
+
+        // Create a short hex fingerprint (first 8 chars = 4 bytes)
+        let fingerprint = hex::encode(&public_key_bytes[..4]);
+
+        Ok(fingerprint)
+    }
+
+    /// Build a composite key from username and KeyPackageIn
+    fn build_composite_key_from_in(
+        username: &str,
+        key_package_in: &KeyPackageIn,
+    ) -> Result<String, StateActorError> {
+        let fingerprint = Self::get_key_fingerprint_from_in(key_package_in)?;
+        Ok(format!("{}@{}", username, fingerprint))
+    }
+
+    /// List all composite keys matching a username prefix
+    /// Example: list_keys_for_username("john") returns ["john@a1b2c3d4", "john@9f8e7d6c"]
+    pub fn list_keys_for_username(&self, username: &str) -> Vec<String> {
+        let prefix = format!("{}@", username);
+        self.key_packages
+            .keys()
+            .filter(|key| key.starts_with(&prefix))
+            .cloned()
+            .collect()
+    }
+
+    /// Parse a composite key into username and fingerprint
+    pub fn parse_composite_key(composite_key: &str) -> Result<(String, String), StateActorError> {
+        let parts: Vec<&str> = composite_key.split('@').collect();
+        if parts.len() != 2 {
+            return Err(StateActorError::InvalidCompositeKey);
+        }
+        Ok((parts[0].to_string(), parts[1].to_string()))
+    }
+
     async fn handle_state_actor_message(
         &mut self,
         msg: StateActorMessage,
@@ -75,7 +120,7 @@ impl StateActor {
                         self.create_mls_group(&name).await?;
 
                         debug!("Successfully created MLS group '{}'", name);
-                        Ok(StateActorReply::Success)
+                        Ok(StateActorReply::Success("Successfully created MLS group".to_string()))
                     }
                     Command::Nick { nickname } => {
                         if let Some(nick) = nickname {
@@ -84,7 +129,7 @@ impl StateActor {
                                     handle_update: Some(nick),
                                 })
                                 .await?;
-                            Ok(StateActorReply::Success)
+                            Ok(StateActorReply::Success("Current nick found.".to_string()))
                         } else {
                             let identity = self
                                 .identity_actor
@@ -125,7 +170,7 @@ impl StateActor {
                             // User wants to set the active group
                             if self.groups.contains_key(&name) {
                                 self.active_group = Some(name);
-                                Ok(StateActorReply::Success)
+                                Ok(StateActorReply::Success("Group found.".to_string()))
                             } else {
                                 Err(StateActorError::GroupNotFound)
                             }
@@ -153,7 +198,8 @@ impl StateActor {
 
                         // Serialize KeyPackage directly (not wrapped in MlsMessageOut)
                         use openmls::prelude::tls_codec::Serialize;
-                        let key_package_bytes = mls_identity.mls_key_package
+                        let key_package_bytes = mls_identity
+                            .mls_key_package
                             .key_package()
                             .tls_serialize_detached()
                             .map_err(|_e| StateActorError::EncryptionFailed)?;
@@ -167,6 +213,13 @@ impl StateActor {
                         // Return wrapped message for network multicast
                         Ok(StateActorReply::MlsMessageOut(proto_message))
                     }
+
+                    Command::Users => {
+                        // get they hashmap keys as the Vec
+                        let known_users: Vec<String> = self.key_packages.keys().cloned().collect();
+                        Ok(StateActorReply::Users(Some(known_users)))
+                    }
+
                     _ => Err(StateActorError::NotImplemented),
                 }
             }
@@ -208,20 +261,32 @@ impl StateActor {
                     );
 
                     // Deserialize the KeyPackage from the announcement
-
-                    let key_package = KeyPackageIn::tls_deserialize(
+                    let key_package_in = KeyPackageIn::tls_deserialize(
                         &mut &user_announcement.tls_serialized_key_package[..],
                     )?;
 
-                    // Cache the KeyPackage by username
-                    debug!(
-                        "Caching KeyPackage for user: {}",
-                        user_announcement.username
-                    );
-                    self.key_packages
-                        .insert(user_announcement.username.clone(), key_package);
+                    // For now, we'll work with KeyPackageIn directly
+                    // Validation happens when users are added to groups
+                    // Build composite key (username@fingerprint)
+                    let composite_key = Self::build_composite_key_from_in(
+                        &user_announcement.username,
+                        &key_package_in,
+                    )?;
 
-                    return Ok(StateActorReply::Success);
+                    // Check if this is a duplicate announcement
+                    if self.key_packages.contains_key(&composite_key) {
+                        debug!(
+                            "Received duplicate announcement for: {} (overwriting)",
+                            composite_key
+                        );
+                    } else {
+                        debug!("Caching new KeyPackage for: {}", composite_key);
+                    }
+
+                    // Store with composite key
+                    self.key_packages.insert(composite_key, key_package_in);
+
+                    return Ok(StateActorReply::Success("Received a new user announcement.".to_string()));
                 }
 
                 // For other message types, convert to MlsMessageIn
@@ -263,7 +328,7 @@ impl StateActor {
                                     &openmls_rust_crypto::OpenMlsRustCrypto::default(),
                                     *staged_commit,
                                 )?;
-                                Ok(StateActorReply::Success)
+                                Ok(StateActorReply::Success("Staged commit received.".to_string()))
                             }
                         }
                     }
@@ -303,7 +368,7 @@ impl StateActor {
                                     &openmls_rust_crypto::OpenMlsRustCrypto::default(),
                                     *staged_commit,
                                 )?;
-                                Ok(StateActorReply::Success)
+                                Ok(StateActorReply::Success("Staged commit received.".to_string()))
                             }
                         }
                     }
@@ -392,5 +457,24 @@ impl StateActor {
         self.active_group = Some(group_name.to_owned());
 
         Ok(())
+    }
+}
+
+/// Test helper to demonstrate the composite key functionality
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_composite_key() {
+        let (username, fingerprint) = StateActor::parse_composite_key("alice@9f8e7d6c").unwrap();
+        assert_eq!(username, "alice");
+        assert_eq!(fingerprint, "9f8e7d6c");
+
+        // Test invalid format
+        assert!(StateActor::parse_composite_key("alice").is_err()); // No @ at all
+        assert!(StateActor::parse_composite_key("alice@@9f8e7d6c").is_err()); // Multiple @
+        assert!(StateActor::parse_composite_key("9f8e7d6c").is_err()); // No @ at all (just fingerprint)
+        assert!(StateActor::parse_composite_key("").is_err()); // Empty string
     }
 }

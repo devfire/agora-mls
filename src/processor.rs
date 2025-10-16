@@ -185,7 +185,7 @@ impl Processor {
         &self,
         state_actor: ActorRef<StateActor>,
         mut receiver: tokio::sync::mpsc::Receiver<Command>,
-        message_sender: tokio::sync::mpsc::Sender<String>,
+        display_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         // let identity_handle = self.identity.handle.clone();
         let network_manager = Arc::clone(&self.network_manager);
@@ -199,19 +199,18 @@ impl Processor {
                     Ok(reply) => {
                         match reply {
                             StateActorReply::ChatHandle(handle) => {
-                                message_sender.send(handle).await.expect(
+                                display_sender.send(handle).await.expect(
                                     "Unable to send chat handle from spawn_command_handler_task",
                                 );
                             }
-                            StateActorReply::Success => {
-                                message_sender.send(String::from("Success!")).await.expect(
+                            StateActorReply::Success(s) => {
+                                display_sender.send(s).await.expect(
                                     "Unable to send chat handle from spawn_command_handler_task",
                                 );
                             }
-
                             StateActorReply::StateActorError(e) => {
                                 debug!("Command processing failed with error: {:?}", e);
-                                message_sender.send(e.to_string()).await.expect(
+                                display_sender.send(e.to_string()).await.expect(
                                     "Unable to send an update from spawn_command_handler_task",
                                 );
                             }
@@ -221,12 +220,12 @@ impl Processor {
                                 } else {
                                     String::from("No groups created.")
                                 };
-                                message_sender.send(my_groups).await.expect(
+                                display_sender.send(my_groups).await.expect(
                                     "Unable to send groups from spawn_command_handler_task",
                                 );
                             }
                             StateActorReply::SafetyNumber(safety_number) => {
-                                message_sender.send(safety_number.to_string()).await.expect(
+                                display_sender.send(safety_number.to_string()).await.expect(
                                     "Unable to send safety_number from spawn_command_handler_task",
                                 );
                             }
@@ -238,7 +237,7 @@ impl Processor {
                                     debug!("No active group");
                                     crate::error::StateActorError::NoActiveGroup.to_string()
                                 };
-                                message_sender.send(active_group).await.expect(
+                                display_sender.send(active_group).await.expect(
                                     "Unable to send responses from spawn_command_handler_task",
                                 );
                             }
@@ -254,6 +253,14 @@ impl Processor {
                             }
                             StateActorReply::DecryptedMessage(_) => {
                                 unreachable!("We'll never return a decrypted msg to a command")
+                            }
+                            StateActorReply::Users(items) => {
+                                if let Some(users) = items {
+                                    // send them to display
+                                    if let Err(e) = display_sender.send(users.join("\n")).await {
+                                        error!("Display handler died, much sadness {e}.")
+                                    }
+                                }
                             }
                         }
                     }
@@ -296,9 +303,9 @@ impl Processor {
                                         .await
                                         .expect("Unable to send the error msg to display");
                                 }
-                                StateActorReply::Success => {
+                                StateActorReply::Success(s) => {
                                     display_sender
-                                        .send("Success!".to_string())
+                                        .send(s)
                                         .await
                                         .expect("This really needs to be mapped to a proper error");
                                 }

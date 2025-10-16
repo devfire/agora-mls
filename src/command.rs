@@ -39,7 +39,7 @@ pub enum Command {
         /// New group name
         name: String,
     },
-    /// List users in current channel
+    /// List known users
     Users,
 
     /// List available groups
