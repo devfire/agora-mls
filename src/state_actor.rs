@@ -1,5 +1,5 @@
 use openmls_rust_crypto::{OpenMlsRustCrypto, RustCrypto};
-use std::collections::HashMap;
+use std::{collections::HashMap, vec};
 
 use prost::Message;
 use tracing::{debug, error};
@@ -39,7 +39,7 @@ pub enum StateActorReply {
     ChatHandle(String),
     SafetyNumber(SafetyNumber),
     ActiveGroup(Option<String>), // Currently active group, if any
-    MlsMessageOut(ProtoMlsMessageOut),
+    MlsMessageOut(Vec<ProtoMlsMessageOut>),
     DecryptedMessage(String),
     Users(Option<Vec<String>>),
     Success(String),
@@ -213,8 +213,11 @@ impl StateActor {
                             key_package_bytes,
                         );
 
+                        // a quick vec to be shipped back
+                        let reply_vec = vec![proto_message];
+
                         // Return wrapped message for network multicast
-                        Ok(StateActorReply::MlsMessageOut(proto_message))
+                        Ok(StateActorReply::MlsMessageOut(reply_vec))
                     }
 
                     Command::Users => {
@@ -257,14 +260,17 @@ impl StateActor {
                             .validate(&RustCrypto::default(), ProtocolVersion::Mls10)?;
 
                         // guess we got the user, let's invite them
-                        let (mls_message_out, welcome, group_info) = current_mls_group_details
+                        let (mls_message_out, welcome, _group_info) = current_mls_group_details
                             .add_members(
                                 &OpenMlsRustCrypto::default(),
                                 &*mls_identity.signature_keypair,
                                 core::slice::from_ref(&validated_key_package),
                             )?;
 
-                        Ok(StateActorReply::Success("User invited".to_string()))
+                        let reply_vec = vec![mls_message_out.try_into()?, welcome.try_into()?];
+                        // Return wrapped message for network multicast
+                        Ok(StateActorReply::MlsMessageOut(reply_vec))
+                        // Ok(StateActorReply::Success("User invited".to_string()))
                     }
 
                     _ => Err(StateActorError::NotImplemented),
@@ -293,8 +299,11 @@ impl StateActor {
                 )?;
 
                 let protobuf_message: ProtoMlsMessageOut = mls_msg_out.try_into()?;
-                // Return the encrypted wrapped packet for network multicast
-                Ok(StateActorReply::MlsMessageOut(protobuf_message))
+                // a quick vec to be shipped back
+                let reply_vec = vec![protobuf_message];
+
+                // Return wrapped message for network multicast
+                Ok(StateActorReply::MlsMessageOut(reply_vec))
             }
             StateActorMessage::Decrypt(chat_packet) => {
                 // Check if this is a UserAnnouncement at the protobuf level first

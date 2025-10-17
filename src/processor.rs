@@ -159,11 +159,11 @@ impl Processor {
                             }
 
                             StateActorReply::MlsMessageOut(proto_mls_msg_out) => {
-                                // Send the packet over the network
-                                if let Err(e) =
-                                    network_manager.send_message(proto_mls_msg_out).await
-                                {
-                                    error!("Failed to send message over network: {}", e);
+                                // Send the packet(s) over the network
+                                for msg in proto_mls_msg_out {
+                                    if let Err(e) = network_manager.send_message(msg).await {
+                                        error!("Failed to send message over network: {}", e);
+                                    }
                                 }
                             }
                             // a response to state_actor.ask(StateActorMessage::Encrypt(message)) is either an StateActorReply::EncryptedMessage or an error
@@ -245,10 +245,23 @@ impl Processor {
                                 // Send the packet over the network.
                                 // Here, it's not a user entered message because all these are command responses.
                                 // It is a "system" message, like a key package announcement.
-                                if let Err(e) =
-                                    network_manager.send_message(proto_mls_msg_out).await
-                                {
-                                    error!("Failed to send message over network: {}", e);
+
+                                // Send messages with better error tracking and reporting
+                                let mut failed_count = 0;
+                                let total_messages = proto_mls_msg_out.len();
+
+                                for msg in proto_mls_msg_out.into_iter() {
+                                    if let Err(e) = network_manager.send_message(msg).await {
+                                        error!("Failed to send message over network: {}", e);
+                                        failed_count += 1;
+                                    }
+                                }
+
+                                if failed_count > 0 {
+                                    error!(
+                                        "Failed to send {}/{} messages",
+                                        failed_count, total_messages
+                                    );
                                 }
                             }
                             StateActorReply::DecryptedMessage(_) => {
