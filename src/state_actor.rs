@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use openmls_rust_crypto::OpenMlsRustCrypto;
 use prost::Message;
 use tracing::{debug, error};
 
@@ -120,7 +121,9 @@ impl StateActor {
                         self.create_mls_group(&name).await?;
 
                         debug!("Successfully created MLS group '{}'", name);
-                        Ok(StateActorReply::Success("Successfully created MLS group".to_string()))
+                        Ok(StateActorReply::Success(
+                            "Successfully created MLS group".to_string(),
+                        ))
                     }
                     Command::Nick { nickname } => {
                         if let Some(nick) = nickname {
@@ -220,6 +223,45 @@ impl StateActor {
                         Ok(StateActorReply::Users(Some(known_users)))
                     }
 
+                    Command::Invite { nick, password: _p } => {
+                        let mls_identity =
+                            self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+
+                        // first check if the user being invited is known.
+                        // If not, we bail - no user, no key package - no invite.
+                        let key_package_in = match self.key_packages.get(&nick) {
+                            Some(key_package_in) => key_package_in,
+                            None => {
+                                return Err(StateActorError::UserNotFound);
+                            }
+                        };
+
+                        // verified the user, let's get the current group name
+                        let current_group_name = match self.active_group {
+                            Some(g) => g,
+                            None => {
+                                return Err(StateActorError::NoActiveGroup);
+                            }
+                        };
+
+                        // now we get the MlsGroup data for the group
+                        let current_mls_group_details = match self.groups.get(&current_group_name) {
+                            Some(mls_group) => mls_group,
+                            None => return Err(StateActorError::GroupNotFound),
+                        };
+
+                        // guess we got the user, let's invite them
+                        let (mls_message_out, welcome, group_info) = current_mls_group_details
+                            .add_members(
+                                &OpenMlsRustCrypto::default(),
+                                &*mls_identity.signature_keypair,
+                                core::slice::from_ref(key_package_in.key_package()),
+                            )
+                            .expect("Could not add members.");
+
+                        Ok(StateActorReply::Success("User invited".to_string()))
+                    }
+
                     _ => Err(StateActorError::NotImplemented),
                 }
             }
@@ -286,7 +328,9 @@ impl StateActor {
                     // Store with composite key
                     self.key_packages.insert(composite_key, key_package_in);
 
-                    return Ok(StateActorReply::Success("Received a new user announcement.".to_string()));
+                    return Ok(StateActorReply::Success(
+                        "Received a new user announcement.".to_string(),
+                    ));
                 }
 
                 // For other message types, convert to MlsMessageIn
@@ -328,7 +372,9 @@ impl StateActor {
                                     &openmls_rust_crypto::OpenMlsRustCrypto::default(),
                                     *staged_commit,
                                 )?;
-                                Ok(StateActorReply::Success("Staged commit received.".to_string()))
+                                Ok(StateActorReply::Success(
+                                    "Staged commit received.".to_string(),
+                                ))
                             }
                         }
                     }
@@ -368,7 +414,9 @@ impl StateActor {
                                     &openmls_rust_crypto::OpenMlsRustCrypto::default(),
                                     *staged_commit,
                                 )?;
-                                Ok(StateActorReply::Success("Staged commit received.".to_string()))
+                                Ok(StateActorReply::Success(
+                                    "Staged commit received.".to_string(),
+                                ))
                             }
                         }
                     }
