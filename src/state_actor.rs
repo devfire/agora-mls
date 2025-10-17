@@ -1,6 +1,6 @@
+use openmls_rust_crypto::{OpenMlsRustCrypto, RustCrypto};
 use std::collections::HashMap;
 
-use openmls_rust_crypto::OpenMlsRustCrypto;
 use prost::Message;
 use tracing::{debug, error};
 
@@ -237,7 +237,7 @@ impl StateActor {
                         };
 
                         // verified the user, let's get the current group name
-                        let current_group_name = match self.active_group {
+                        let current_group_name = match &self.active_group {
                             Some(g) => g,
                             None => {
                                 return Err(StateActorError::NoActiveGroup);
@@ -245,19 +245,24 @@ impl StateActor {
                         };
 
                         // now we get the MlsGroup data for the group
-                        let current_mls_group_details = match self.groups.get(&current_group_name) {
-                            Some(mls_group) => mls_group,
-                            None => return Err(StateActorError::GroupNotFound),
-                        };
+                        let current_mls_group_details =
+                            match self.groups.get_mut(current_group_name) {
+                                Some(mls_group) => mls_group,
+                                None => return Err(StateActorError::GroupNotFound),
+                            };
+
+                        // Validate the KeyPackageIn to get a KeyPackage
+                        let validated_key_package = key_package_in
+                            .clone()
+                            .validate(&RustCrypto::default(), ProtocolVersion::Mls10)?;
 
                         // guess we got the user, let's invite them
                         let (mls_message_out, welcome, group_info) = current_mls_group_details
                             .add_members(
                                 &OpenMlsRustCrypto::default(),
                                 &*mls_identity.signature_keypair,
-                                core::slice::from_ref(key_package_in.key_package()),
-                            )
-                            .expect("Could not add members.");
+                                core::slice::from_ref(&validated_key_package),
+                            )?;
 
                         Ok(StateActorReply::Success("User invited".to_string()))
                     }
