@@ -300,7 +300,7 @@ impl Processor {
             loop {
                 match network_manager.receive_message().await {
                     Ok(packet) => {
-                        debug!("Received network packet: {:?}", packet);
+                        // debug!("Received network packet: {:?}", packet);
 
                         match state_actor.ask(StateActorMessage::Decrypt(packet)).await {
                             Ok(reply) => match reply {

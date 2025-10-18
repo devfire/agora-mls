@@ -273,6 +273,11 @@ impl StateActor {
                         // Ok(StateActorReply::Success("User invited".to_string()))
                     }
 
+                    Command::Groups => {
+                        let groups: Vec<String> = self.groups.keys().cloned().collect();
+
+                        Ok(StateActorReply::Groups(Some(groups)))
+                    }
                     _ => Err(StateActorError::NotImplemented),
                 }
             }
@@ -453,17 +458,17 @@ impl StateActor {
                             None, // ratchet_tree - typically not needed for basic joins
                         )?;
 
+                        debug!("Staged welcome processed successfully.");
                         // Convert staged welcome into an MlsGroup
                         let mls_group = staged_welcome.into_group(&OpenMlsRustCrypto::default())?;
 
                         // Extract group name from extensions, or generate from group ID if not found
-                        let group_name = Self::get_group_name(&mls_group).unwrap_or_else(|| {
-                            // Fallback: use a portion of group ID as name if extension not found
-                            format!(
-                                "group-{}",
-                                hex::encode(&mls_group.group_id().as_slice()[..8])
-                            )
-                        });
+                        let group_name = if let Some(name) = Self::get_group_name(&mls_group) {
+                            debug!("Successfully extracted group name {name}");
+                            name
+                        } else {
+                            return Err(StateActorError::GroupNotFound);
+                        };
 
                         debug!("Successfully joined group: {}", group_name);
 
