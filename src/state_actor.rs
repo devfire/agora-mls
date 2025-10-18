@@ -9,9 +9,8 @@ use openmls::prelude::{tls_codec::Deserialize, *};
 
 use crate::{
     command::Command,
+    crypto_identity_actor::{CryptoIdentityActor, CryptoIdentityMessage, CryptoIdentityReply},
     error::StateActorError,
-    identity_actor::{IdentityActor, IdentityActorMsg},
-    openmls_actor::{OpenMlsActor, OpenMlsIdentityRequest},
     protobuf_wrapper::{ProtoMlsMessageIn, ProtoMlsMessageOut},
     safety_number::{SafetyNumber, generate_safety_number},
 };
@@ -21,8 +20,7 @@ pub struct StateActor {
     // membership: HashMap<VerifyingKey, Vec<Group>>, // Maps handle to channels
     groups: HashMap<String, MlsGroup>, // Maps group name to MlsGroup
     active_group: Option<String>,      // Currently active group name, if any
-    identity_actor: ActorRef<IdentityActor>,
-    mls_identity_actor: ActorRef<OpenMlsActor>,
+    crypto_identity: ActorRef<CryptoIdentityActor>, // Combined identity and MLS actor
     key_packages: HashMap<String, KeyPackageIn>, // composite_key -> KeyPackageIn cache
 }
 
@@ -127,17 +125,19 @@ impl StateActor {
                     }
 
                     Command::Safety => {
-                        // First, let's get the verifyingkey from the identity actor
+                        // Get the verifying key from the crypto identity actor
                         let verifying_key = match self
-                            .identity_actor
-                            .ask(crate::identity_actor::IdentityActorMsg {
-                                handle_update: None,
-                            })
+                            .crypto_identity
+                            .ask(CryptoIdentityMessage::GetIdentity)
                             .await
                         {
-                            Ok(reply) => reply.verifying_key,
+                            Ok(CryptoIdentityReply::Identity { verifying_key, .. }) => verifying_key,
+                            Ok(_) => {
+                                error!("Unexpected reply type from CryptoIdentityActor");
+                                return Err(StateActorError::MissingVerifyingKey);
+                            }
                             Err(e) => {
-                                error!("Failed to get verifying key from IdentityActor: {e}");
+                                error!("Failed to get verifying key from CryptoIdentityActor: {e}");
                                 return Err(StateActorError::MissingVerifyingKey);
                             }
                         };
@@ -171,28 +171,31 @@ impl StateActor {
                         }
                     }
                     Command::Announce => {
-                        let mls_identity =
-                            self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+                        let CryptoIdentityReply::MlsIdentity { mls_key_package, .. } =
+                            self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await?
+                        else {
+                            return Err(StateActorError::EncryptionFailed);
+                        };
 
-                        // Get username from identity actor
-                        let identity_reply = self
-                            .identity_actor
-                            .ask(IdentityActorMsg {
-                                handle_update: None,
-                            })
-                            .await?;
+                        // Get username from crypto identity actor
+                        let CryptoIdentityReply::Identity { handle, .. } = self
+                            .crypto_identity
+                            .ask(CryptoIdentityMessage::GetIdentity)
+                            .await?
+                        else {
+                            return Err(StateActorError::EncryptionFailed);
+                        };
 
                         // Serialize KeyPackage directly (not wrapped in MlsMessageOut)
                         use openmls::prelude::tls_codec::Serialize;
-                        let key_package_bytes = mls_identity
-                            .mls_key_package
+                        let key_package_bytes = mls_key_package
                             .key_package()
                             .tls_serialize_detached()
                             .map_err(|_e| StateActorError::EncryptionFailed)?;
 
                         // Create UserAnnouncement protobuf (consistent with try_into pattern)
                         let proto_message = Self::create_user_announcement(
-                            identity_reply.handle,
+                            handle,
                             key_package_bytes,
                         );
 
@@ -210,8 +213,13 @@ impl StateActor {
                     }
 
                     Command::Invite { nick, password: _p } => {
-                        let mls_identity =
-                            self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+                        let CryptoIdentityReply::MlsIdentity {
+                            crypto_provider,
+                            signature_keypair,
+                            ..
+                        } = self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await? else {
+                            return Err(StateActorError::EncryptionFailed);
+                        };
 
                         // first check if the user being invited is known.
                         // If not, we bail - no user, no key package - no invite.
@@ -245,14 +253,14 @@ impl StateActor {
                         // guess we got the user, let's invite them
                         let (mls_message_out, welcome, _group_info) = current_mls_group_details
                             .add_members(
-                                mls_identity.crypto_provider.as_ref(),
-                                &*mls_identity.signature_keypair,
+                                crypto_provider.as_ref(),
+                                &*signature_keypair,
                                 core::slice::from_ref(&validated_key_package),
                             )?;
 
                         // CRITICAL: Merge the pending commit so Alice's group advances to the new epoch
                         current_mls_group_details
-                            .merge_pending_commit(mls_identity.crypto_provider.as_ref())?;
+                            .merge_pending_commit(crypto_provider.as_ref())?;
                         debug!(
                             "Merged pending commit after adding members - group now at epoch {}",
                             current_mls_group_details.epoch()
@@ -275,7 +283,13 @@ impl StateActor {
             StateActorMessage::Encrypt(plaintext_payload) => {
                 debug!("Encrypting message for transport");
 
-                let mls_identity = self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+                let CryptoIdentityReply::MlsIdentity {
+                    crypto_provider,
+                    signature_keypair,
+                    ..
+                } = self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await? else {
+                    return Err(StateActorError::EncryptionFailed);
+                };
 
                 // Let's get the active group name first
                 let active_group_name = self
@@ -289,8 +303,8 @@ impl StateActor {
 
                 // OK, let's try to encrypt the message
                 let mls_msg_out = mls_group_ref.create_message(
-                    mls_identity.crypto_provider.as_ref(),
-                    &*mls_identity.signature_keypair,
+                    crypto_provider.as_ref(),
+                    &*signature_keypair,
                     plaintext_payload.encode_to_vec().as_slice(),
                 )?;
 
@@ -348,8 +362,11 @@ impl StateActor {
 
                 match proto_in.extract() {
                     MlsMessageBodyIn::PublicMessage(msg) => {
-                        let mls_identity =
-                            self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+                        let CryptoIdentityReply::MlsIdentity { crypto_provider, .. } =
+                            self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await?
+                        else {
+                            return Err(StateActorError::EncryptionFailed);
+                        };
 
                         let active_group_name = self
                             .active_group
@@ -361,7 +378,7 @@ impl StateActor {
                             .ok_or(StateActorError::GroupNotFound)?;
                         let protocol_message = ProtocolMessage::from(msg);
                         let processed_message = mls_group_ref.process_message(
-                            mls_identity.crypto_provider.as_ref(),
+                            crypto_provider.as_ref(),
                             protocol_message,
                         )?;
 
@@ -382,7 +399,7 @@ impl StateActor {
                             ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
                                 debug!("Received staged commit - merging changes");
                                 mls_group_ref.merge_staged_commit(
-                                    mls_identity.crypto_provider.as_ref(),
+                                    crypto_provider.as_ref(),
                                     *staged_commit,
                                 )?;
                                 Ok(StateActorReply::Success(
@@ -392,8 +409,11 @@ impl StateActor {
                         }
                     }
                     MlsMessageBodyIn::PrivateMessage(msg) => {
-                        let mls_identity =
-                            self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+                        let CryptoIdentityReply::MlsIdentity { crypto_provider, .. } =
+                            self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await?
+                        else {
+                            return Err(StateActorError::EncryptionFailed);
+                        };
 
                         let protocol_message = ProtocolMessage::from(msg);
 
@@ -406,7 +426,7 @@ impl StateActor {
                             .get_mut(active_group_name)
                             .ok_or(StateActorError::GroupNotFound)?;
                         let processed_message = mls_group_ref.process_message(
-                            mls_identity.crypto_provider.as_ref(),
+                            crypto_provider.as_ref(),
                             protocol_message,
                         )?;
 
@@ -427,7 +447,7 @@ impl StateActor {
                             ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
                                 debug!("Received staged commit - merging changes");
                                 mls_group_ref.merge_staged_commit(
-                                    mls_identity.crypto_provider.as_ref(),
+                                    crypto_provider.as_ref(),
                                     *staged_commit,
                                 )?;
                                 Ok(StateActorReply::Success(
@@ -441,19 +461,22 @@ impl StateActor {
                         debug!("Received Welcome message - processing group join");
 
                         // Get MLS identity to access the shared crypto provider
-                        let mls_identity =
-                            self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+                        let CryptoIdentityReply::MlsIdentity { crypto_provider, ciphersuite, .. } =
+                            self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await?
+                        else {
+                            return Err(StateActorError::EncryptionFailed);
+                        };
 
                         debug!(
                             "Retrieved MLS identity, ciphersuite: {:?}",
-                            mls_identity.ciphersuite
+                            ciphersuite
                         );
 
                         // Create configuration for joining a group
                         let mls_group_join_config = MlsGroupJoinConfig::default();
 
                         // FIXED: Use the shared crypto provider that has our stored keys
-                        let provider = mls_identity.crypto_provider.as_ref();
+                        let provider = crypto_provider.as_ref();
                         debug!("Using shared crypto provider with stored keys");
 
                         // Stage the Welcome message first
@@ -558,21 +581,26 @@ impl StateActor {
 }
 impl StateActor {
     pub fn new(
-        identity_actor: ActorRef<IdentityActor>,
-        mls_identity_actor: ActorRef<OpenMlsActor>,
+        crypto_identity: ActorRef<CryptoIdentityActor>,
     ) -> Self {
         Self {
             groups: HashMap::new(),
             active_group: None,
-            identity_actor,
-            mls_identity_actor,
+            crypto_identity,
             key_packages: HashMap::new(),
         }
     }
 
     async fn create_mls_group(&mut self, group_name: &str) -> anyhow::Result<()> {
         const GROUP_NAME_EXTENSION_ID: u16 = 13;
-        let mls_identity = self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+        let CryptoIdentityReply::MlsIdentity {
+            ciphersuite,
+            signature_keypair,
+            credential_with_key,
+            ..
+        } = self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await? else {
+            return Err(anyhow::anyhow!("Failed to get MLS identity"));
+        };
 
         // 1. Define your custom group name as bytes
         let group_name_bytes = group_name.as_bytes();
@@ -589,7 +617,7 @@ impl StateActor {
         let extensions = Extensions::single(group_name_extension);
 
         let mls_group_create_config = MlsGroupCreateConfig::builder()
-            .ciphersuite(mls_identity.ciphersuite)
+            .ciphersuite(ciphersuite)
             .with_group_context_extensions(extensions)?
             .use_ratchet_tree_extension(true) // Include ratchet tree in Welcome messages
             .build();
@@ -597,9 +625,9 @@ impl StateActor {
         // Create the group with default configuration
         let group = openmls::group::MlsGroup::new(
             &openmls_rust_crypto::OpenMlsRustCrypto::default(),
-            &*mls_identity.signature_keypair,
+            &*signature_keypair,
             &mls_group_create_config,
-            mls_identity.credential_with_key,
+            credential_with_key,
         )?;
 
         // Add the group to the HashMap
