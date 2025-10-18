@@ -305,18 +305,21 @@ impl Processor {
                         match state_actor.ask(StateActorMessage::Decrypt(packet)).await {
                             Ok(reply) => match reply {
                                 StateActorReply::DecryptedMessage(message) => {
+                                    debug!("Decrypted message {message}");
                                     display_sender
                                         .send(message)
                                         .await
                                         .expect("Unable to send the decrypted msg to display");
                                 }
                                 StateActorReply::StateActorError(e) => {
+                                    debug!("Received an error {e}");
                                     display_sender
                                         .send(e.to_string())
                                         .await
                                         .expect("Unable to send the error msg to display");
                                 }
                                 StateActorReply::Success(s) => {
+                                    debug!("Received success message: {s}");
                                     display_sender
                                         .send(s)
                                         .await
