@@ -51,12 +51,6 @@ pub enum Command {
         name: Option<String>,
     },
 
-    /// Display or set your nickname
-    Nick {
-        /// New nickname
-        nickname: Option<String>,
-    },
-
     /// Generate the safety number for the current identity
     Safety,
 

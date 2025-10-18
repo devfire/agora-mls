@@ -125,24 +125,7 @@ impl StateActor {
                             "Successfully created MLS group".to_string(),
                         ))
                     }
-                    Command::Nick { nickname } => {
-                        if let Some(nick) = nickname {
-                            self.identity_actor
-                                .tell(IdentityActorMsg {
-                                    handle_update: Some(nick),
-                                })
-                                .await?;
-                            Ok(StateActorReply::Success("Current nick found.".to_string()))
-                        } else {
-                            let identity = self
-                                .identity_actor
-                                .ask(IdentityActorMsg {
-                                    handle_update: None,
-                                })
-                                .await?;
-                            Ok(StateActorReply::ChatHandle(identity.handle.clone()))
-                        }
-                    }
+
                     Command::Safety => {
                         // First, let's get the verifyingkey from the identity actor
                         let verifying_key = match self
