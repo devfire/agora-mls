@@ -14,6 +14,7 @@ pub struct OpenMlsActor {
     pub mls_key_package: KeyPackageBundle,
     pub credential_with_key: CredentialWithKey,
     pub signature_keypair: Arc<SignatureKeyPair>,
+    pub crypto_provider: Arc<OpenMlsRustCrypto>, // Shared crypto provider with stored keys
 }
 
 // Define the message
@@ -25,6 +26,7 @@ pub struct OpenMlsIdentityReply {
     pub credential_with_key: CredentialWithKey,
     pub signature_keypair: Arc<SignatureKeyPair>, // neither Clone nor Copy is implemented, bummer. So we wrap it in an Arc.
     pub ciphersuite: Ciphersuite,
+    pub crypto_provider: Arc<OpenMlsRustCrypto>, // Shared crypto provider with stored keys
 }
 
 // Implement the message handling for HelloWorldActor
@@ -41,6 +43,7 @@ impl Message<OpenMlsIdentityRequest> for OpenMlsActor {
             credential_with_key: self.credential_with_key.clone(),
             signature_keypair: self.signature_keypair.clone(),
             ciphersuite: self.ciphersuite,
+            crypto_provider: self.crypto_provider.clone(),
         }
     }
 }
@@ -60,7 +63,8 @@ impl OpenMlsActor {
     /// * If key storage or key package creation fails
     pub async fn new(identity: &ActorRef<IdentityActor>) -> Self {
         let ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519;
-        let provider = &OpenMlsRustCrypto::default();
+        // Create a shared crypto provider that will be reused across all MLS operations
+        let provider = Arc::new(OpenMlsRustCrypto::default());
 
         let identity_reply = identity
             .ask(IdentityActorMsg {
@@ -80,7 +84,7 @@ impl OpenMlsActor {
 
         // Store the signature key into the key store so OpenMLS has access to it.
         signature_keypair
-            .store(provider.storage())
+            .store(provider.as_ref().storage())
             .expect("Error storing signature keys in key store.");
 
         //     // self.signature_keypair = Some(signature_key_pair);
@@ -93,7 +97,7 @@ impl OpenMlsActor {
         let mls_key_package = KeyPackage::builder()
             .build(
                 ciphersuite,
-                &OpenMlsRustCrypto::default(),
+                provider.as_ref(),
                 &signature_keypair,
                 credential_with_key.clone(),
             )
@@ -105,6 +109,7 @@ impl OpenMlsActor {
             mls_key_package,
             signature_keypair: Arc::new(signature_keypair),
             credential_with_key,
+            crypto_provider: provider,
         }
     }
 }

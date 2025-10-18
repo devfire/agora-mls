@@ -1,7 +1,7 @@
 use core::convert::Infallible;
 use kameo::error::SendError;
 use openmls::{
-    group::{AddMembersError, CreateMessageError, MergeCommitError, ProcessMessageError},
+    group::{AddMembersError, CreateMessageError, MergeCommitError, MergePendingCommitError, ProcessMessageError},
     prelude::{KeyPackageVerifyError, WelcomeError},
 };
 use openmls_rust_crypto::MemoryStorageError;
@@ -119,6 +119,9 @@ pub enum StateActorError {
 
     #[error("Failed to process Welcome message")]
     WelcomeError(#[from] WelcomeError<MemoryStorageError>),
+
+    #[error("Failed to merge pending commit: {0}")]
+    MlsMergePendingCommitError(#[from] MergePendingCommitError<MemoryStorageError>),
 }
 
 #[derive(Error, Debug)]
