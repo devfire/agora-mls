@@ -1,6 +1,9 @@
 use core::convert::Infallible;
 use kameo::error::SendError;
-use openmls::group::{CreateMessageError, MergeCommitError, ProcessMessageError};
+use openmls::{
+    group::{AddMembersError, CreateMessageError, MergeCommitError, MergePendingCommitError, ProcessMessageError},
+    prelude::{KeyPackageVerifyError, WelcomeError},
+};
 use openmls_rust_crypto::MemoryStorageError;
 use prost::DecodeError;
 use std::net::SocketAddr;
@@ -106,10 +109,19 @@ pub enum StateActorError {
     MlsProcessStorageError(#[from] ProcessMessageError<MemoryStorageError>),
 
     #[error("Failed to validate KeyPackage")]
-    KeyPackageValidationFailed,
+    KeyPackageValidationFailed(#[from] KeyPackageVerifyError),
 
     #[error("Invalid composite key format (expected username@fingerprint)")]
     InvalidCompositeKey,
+
+    #[error("Failed to add member")]
+    AddMemberFailed(#[from] AddMembersError<MemoryStorageError>),
+
+    #[error("Failed to process Welcome message")]
+    WelcomeError(#[from] WelcomeError<MemoryStorageError>),
+
+    #[error("Failed to merge pending commit: {0}")]
+    MlsMergePendingCommitError(#[from] MergePendingCommitError<MemoryStorageError>),
 }
 
 #[derive(Error, Debug)]

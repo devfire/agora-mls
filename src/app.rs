@@ -60,11 +60,15 @@ impl App {
         ));
 
         // Kick off the processor & share everything it needs
-        let processor = Processor::new(Arc::clone(&network_manager));
+        let processor = Processor::new(self.config.chat_id.clone(), Arc::clone(&network_manager));
 
         // Note the distinct lack of .await here - we want to spawn these tasks and let them run concurrently
         // rather than waiting for each to complete before starting the next.
-        let stdin_handle = processor.spawn_stdin_input_task(command_sender, message_sender.clone());
+        let stdin_handle = processor.spawn_stdin_input_task(
+            command_sender,
+            message_sender.clone(),
+            display_sender.clone(),
+        );
 
         let command_handle = processor.spawn_command_handler_task(
             state_actor_ref.clone(),
@@ -83,8 +87,7 @@ impl App {
             processor.spawn_udp_input_task(state_actor_ref.clone(), display_sender.clone());
 
         // Start the display task to show messages to the user
-        let display_handle =
-            processor.spawn_message_display_task(state_actor_ref.clone(), display_receiver);
+        let display_handle = processor.spawn_message_display_task(display_receiver);
 
         // Wait for tasks to complete (they run indefinitely)
         // The stdin_input_handle is the only one designed to finish, triggering a shutdown.

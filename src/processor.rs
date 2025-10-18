@@ -11,21 +11,20 @@ use crate::{
 };
 
 pub struct Processor {
-    // pub identity: MyIdentity,
     pub network_manager: Arc<network::NetworkManager>,
-    // pub state_actor: ActorRef<StateActor>,
+    pub nick: String,
 }
 
 impl Processor {
     pub fn new(
         // state_actor: ActorRef<StateActor>,
         // identity: MyIdentity,
+        nick: String,
         network_manager: Arc<network::NetworkManager>,
     ) -> Self {
         Self {
-            // identity,
             network_manager,
-            // state_actor,
+            nick,
         }
     }
 
@@ -34,6 +33,7 @@ impl Processor {
         &self,
         command_sender: tokio::sync::mpsc::Sender<Command>,
         message_sender: tokio::sync::mpsc::Sender<String>,
+        display_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         // get the chat handle from the state actor
 
@@ -56,6 +56,7 @@ impl Processor {
         The correct way to handle blocking code within a tokio runtime is to use tokio::task::spawn_blocking.
         This moves the blocking operation to a dedicated thread pool for blocking tasks, leaving the main tokio worker threads free to continue running other async tasks.
         */
+        let nick = self.nick.clone();
         tokio::task::spawn_blocking(move || {
             // debug!("Starting stdin input task for agent '{}'", handle);
             let mut rustyline_editor = match DefaultEditor::new() {
@@ -69,7 +70,7 @@ impl Processor {
             // This just fans out commands & messages to the respective handlers very fast.
             // Replies either go to the display or to the network outbound
             loop {
-                let readline = rustyline_editor.readline(&format!(" > "));
+                let readline = rustyline_editor.readline(&format!("{} > ", nick));
 
                 match readline {
                     Ok(line) => {
@@ -98,12 +99,12 @@ impl Processor {
                                         Command::show_custom_help();
                                     } else {
                                         debug!("Command processing failed with {e}");
-                                        if message_sender.blocking_send(e.to_string()).is_err() {
+                                        if display_sender.blocking_send(e.to_string()).is_err() {
                                             error!(
                                                 "Unable to send error from spawn_stdin_input_task"
                                             );
-                                            break;
                                         }
+                                        continue;
                                     }
                                 }
                             }
@@ -159,11 +160,11 @@ impl Processor {
                             }
 
                             StateActorReply::MlsMessageOut(proto_mls_msg_out) => {
-                                // Send the packet over the network
-                                if let Err(e) =
-                                    network_manager.send_message(proto_mls_msg_out).await
-                                {
-                                    error!("Failed to send message over network: {}", e);
+                                // Send the packet(s) over the network
+                                for msg in proto_mls_msg_out {
+                                    if let Err(e) = network_manager.send_message(msg).await {
+                                        error!("Failed to send message over network: {}", e);
+                                    }
                                 }
                             }
                             // a response to state_actor.ask(StateActorMessage::Encrypt(message)) is either an StateActorReply::EncryptedMessage or an error
@@ -245,10 +246,23 @@ impl Processor {
                                 // Send the packet over the network.
                                 // Here, it's not a user entered message because all these are command responses.
                                 // It is a "system" message, like a key package announcement.
-                                if let Err(e) =
-                                    network_manager.send_message(proto_mls_msg_out).await
-                                {
-                                    error!("Failed to send message over network: {}", e);
+
+                                // Send messages with better error tracking and reporting
+                                let mut failed_count = 0;
+                                let total_messages = proto_mls_msg_out.len();
+
+                                for msg in proto_mls_msg_out.into_iter() {
+                                    if let Err(e) = network_manager.send_message(msg).await {
+                                        error!("Failed to send message over network: {}", e);
+                                        failed_count += 1;
+                                    }
+                                }
+
+                                if failed_count > 0 {
+                                    error!(
+                                        "Failed to send {}/{} messages",
+                                        failed_count, total_messages
+                                    );
                                 }
                             }
                             StateActorReply::DecryptedMessage(_) => {
@@ -287,23 +301,26 @@ impl Processor {
             loop {
                 match network_manager.receive_message().await {
                     Ok(packet) => {
-                        debug!("Received network packet: {:?}", packet);
+                        // debug!("Received network packet: {:?}", packet);
 
                         match state_actor.ask(StateActorMessage::Decrypt(packet)).await {
                             Ok(reply) => match reply {
                                 StateActorReply::DecryptedMessage(message) => {
+                                    debug!("Decrypted message {message}");
                                     display_sender
                                         .send(message)
                                         .await
                                         .expect("Unable to send the decrypted msg to display");
                                 }
                                 StateActorReply::StateActorError(e) => {
+                                    debug!("Received an error {e}");
                                     display_sender
                                         .send(e.to_string())
                                         .await
                                         .expect("Unable to send the error msg to display");
                                 }
                                 StateActorReply::Success(s) => {
+                                    debug!("Received success message: {s}");
                                     display_sender
                                         .send(s)
                                         .await
@@ -332,24 +349,12 @@ impl Processor {
     /// Display task for printing messages to console. This task is READ ONLY and does not send messages.
     pub fn spawn_message_display_task(
         &self,
-        state_actor: ActorRef<StateActor>,
         mut receiver: tokio::sync::mpsc::Receiver<String>,
     ) -> tokio::task::JoinHandle<()> {
+        let nick = self.nick.clone();
         tokio::spawn(async move {
             debug!("Starting message display task.");
-            let chat_id = match state_actor
-                .ask(StateActorMessage::Command(Command::Nick { nickname: None }))
-                .await
-            {
-                Ok(StateActorReply::ChatHandle(handle)) => handle,
-                Err(e) => {
-                    error!("Unable to get chat handle: {}", e);
-                    return;
-                }
-                _ => {
-                    unreachable!("Expected ChatHandle reply")
-                }
-            };
+
             while let Some(message) = receiver.recv().await {
                 eprint!("\r\x1b[K");
                 eprintln!("{message}");
@@ -357,7 +362,7 @@ impl Processor {
                 //     "{} {}: {}",
                 //     message.timestamp, message.display_name, message.content
                 // );
-                eprint!("{} > ", chat_id);
+                eprint!("{} > ", nick);
             }
             debug!("Message display task ending.");
         })

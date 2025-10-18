@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use openmls_rust_crypto::RustCrypto;
+use std::{collections::HashMap, vec};
 
 use prost::Message;
 use tracing::{debug, error};
@@ -38,7 +39,7 @@ pub enum StateActorReply {
     ChatHandle(String),
     SafetyNumber(SafetyNumber),
     ActiveGroup(Option<String>), // Currently active group, if any
-    MlsMessageOut(ProtoMlsMessageOut),
+    MlsMessageOut(Vec<ProtoMlsMessageOut>),
     DecryptedMessage(String),
     Users(Option<Vec<String>>),
     Success(String),
@@ -120,26 +121,11 @@ impl StateActor {
                         self.create_mls_group(&name).await?;
 
                         debug!("Successfully created MLS group '{}'", name);
-                        Ok(StateActorReply::Success("Successfully created MLS group".to_string()))
+                        Ok(StateActorReply::Success(
+                            "Successfully created MLS group".to_string(),
+                        ))
                     }
-                    Command::Nick { nickname } => {
-                        if let Some(nick) = nickname {
-                            self.identity_actor
-                                .tell(IdentityActorMsg {
-                                    handle_update: Some(nick),
-                                })
-                                .await?;
-                            Ok(StateActorReply::Success("Current nick found.".to_string()))
-                        } else {
-                            let identity = self
-                                .identity_actor
-                                .ask(IdentityActorMsg {
-                                    handle_update: None,
-                                })
-                                .await?;
-                            Ok(StateActorReply::ChatHandle(identity.handle.clone()))
-                        }
-                    }
+
                     Command::Safety => {
                         // First, let's get the verifyingkey from the identity actor
                         let verifying_key = match self
@@ -210,8 +196,11 @@ impl StateActor {
                             key_package_bytes,
                         );
 
+                        // a quick vec to be shipped back
+                        let reply_vec = vec![proto_message];
+
                         // Return wrapped message for network multicast
-                        Ok(StateActorReply::MlsMessageOut(proto_message))
+                        Ok(StateActorReply::MlsMessageOut(reply_vec))
                     }
 
                     Command::Users => {
@@ -220,6 +209,66 @@ impl StateActor {
                         Ok(StateActorReply::Users(Some(known_users)))
                     }
 
+                    Command::Invite { nick, password: _p } => {
+                        let mls_identity =
+                            self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+
+                        // first check if the user being invited is known.
+                        // If not, we bail - no user, no key package - no invite.
+                        let key_package_in = match self.key_packages.get(&nick) {
+                            Some(key_package_in) => key_package_in,
+                            None => {
+                                return Err(StateActorError::UserNotFound);
+                            }
+                        };
+
+                        // verified the user, let's get the current group name
+                        let current_group_name = match &self.active_group {
+                            Some(g) => g,
+                            None => {
+                                return Err(StateActorError::NoActiveGroup);
+                            }
+                        };
+
+                        // now we get the MlsGroup data for the group
+                        let current_mls_group_details =
+                            match self.groups.get_mut(current_group_name) {
+                                Some(mls_group) => mls_group,
+                                None => return Err(StateActorError::GroupNotFound),
+                            };
+
+                        // Validate the KeyPackageIn to get a KeyPackage
+                        let validated_key_package = key_package_in
+                            .clone()
+                            .validate(&RustCrypto::default(), ProtocolVersion::Mls10)?;
+
+                        // guess we got the user, let's invite them
+                        let (mls_message_out, welcome, _group_info) = current_mls_group_details
+                            .add_members(
+                                mls_identity.crypto_provider.as_ref(),
+                                &*mls_identity.signature_keypair,
+                                core::slice::from_ref(&validated_key_package),
+                            )?;
+
+                        // CRITICAL: Merge the pending commit so Alice's group advances to the new epoch
+                        current_mls_group_details
+                            .merge_pending_commit(mls_identity.crypto_provider.as_ref())?;
+                        debug!(
+                            "Merged pending commit after adding members - group now at epoch {}",
+                            current_mls_group_details.epoch()
+                        );
+
+                        let reply_vec = vec![mls_message_out.try_into()?, welcome.try_into()?];
+                        // Return wrapped message for network multicast
+                        Ok(StateActorReply::MlsMessageOut(reply_vec))
+                        // Ok(StateActorReply::Success("User invited".to_string()))
+                    }
+
+                    Command::Groups => {
+                        let groups: Vec<String> = self.groups.keys().cloned().collect();
+
+                        Ok(StateActorReply::Groups(Some(groups)))
+                    }
                     _ => Err(StateActorError::NotImplemented),
                 }
             }
@@ -240,14 +289,17 @@ impl StateActor {
 
                 // OK, let's try to encrypt the message
                 let mls_msg_out = mls_group_ref.create_message(
-                    &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                    mls_identity.crypto_provider.as_ref(),
                     &*mls_identity.signature_keypair,
                     plaintext_payload.encode_to_vec().as_slice(),
                 )?;
 
                 let protobuf_message: ProtoMlsMessageOut = mls_msg_out.try_into()?;
-                // Return the encrypted wrapped packet for network multicast
-                Ok(StateActorReply::MlsMessageOut(protobuf_message))
+                // a quick vec to be shipped back
+                let reply_vec = vec![protobuf_message];
+
+                // Return wrapped message for network multicast
+                Ok(StateActorReply::MlsMessageOut(reply_vec))
             }
             StateActorMessage::Decrypt(chat_packet) => {
                 // Check if this is a UserAnnouncement at the protobuf level first
@@ -286,7 +338,9 @@ impl StateActor {
                     // Store with composite key
                     self.key_packages.insert(composite_key, key_package_in);
 
-                    return Ok(StateActorReply::Success("Received a new user announcement.".to_string()));
+                    return Ok(StateActorReply::Success(
+                        "Received a new user announcement.".to_string(),
+                    ));
                 }
 
                 // For other message types, convert to MlsMessageIn
@@ -294,6 +348,9 @@ impl StateActor {
 
                 match proto_in.extract() {
                     MlsMessageBodyIn::PublicMessage(msg) => {
+                        let mls_identity =
+                            self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+
                         let active_group_name = self
                             .active_group
                             .as_ref()
@@ -304,7 +361,7 @@ impl StateActor {
                             .ok_or(StateActorError::GroupNotFound)?;
                         let protocol_message = ProtocolMessage::from(msg);
                         let processed_message = mls_group_ref.process_message(
-                            &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                            mls_identity.crypto_provider.as_ref(),
                             protocol_message,
                         )?;
 
@@ -325,14 +382,19 @@ impl StateActor {
                             ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
                                 debug!("Received staged commit - merging changes");
                                 mls_group_ref.merge_staged_commit(
-                                    &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                                    mls_identity.crypto_provider.as_ref(),
                                     *staged_commit,
                                 )?;
-                                Ok(StateActorReply::Success("Staged commit received.".to_string()))
+                                Ok(StateActorReply::Success(
+                                    "Staged commit received.".to_string(),
+                                ))
                             }
                         }
                     }
                     MlsMessageBodyIn::PrivateMessage(msg) => {
+                        let mls_identity =
+                            self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+
                         let protocol_message = ProtocolMessage::from(msg);
 
                         let active_group_name = self
@@ -344,7 +406,7 @@ impl StateActor {
                             .get_mut(active_group_name)
                             .ok_or(StateActorError::GroupNotFound)?;
                         let processed_message = mls_group_ref.process_message(
-                            &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                            mls_identity.crypto_provider.as_ref(),
                             protocol_message,
                         )?;
 
@@ -365,24 +427,113 @@ impl StateActor {
                             ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
                                 debug!("Received staged commit - merging changes");
                                 mls_group_ref.merge_staged_commit(
-                                    &openmls_rust_crypto::OpenMlsRustCrypto::default(),
+                                    mls_identity.crypto_provider.as_ref(),
                                     *staged_commit,
                                 )?;
-                                Ok(StateActorReply::Success("Staged commit received.".to_string()))
+                                Ok(StateActorReply::Success(
+                                    "Staged commit received.".to_string(),
+                                ))
                             }
                         }
                     }
 
-                    MlsMessageBodyIn::Welcome(_welcome) => {
+                    MlsMessageBodyIn::Welcome(welcome) => {
                         debug!("Received Welcome message - processing group join");
-                        // Handle Welcome messages for joining groups
-                        // This would be used when this client wants to join a group
-                        Err(StateActorError::NotImplemented)
+
+                        // Get MLS identity to access the shared crypto provider
+                        let mls_identity =
+                            self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+
+                        debug!(
+                            "Retrieved MLS identity, ciphersuite: {:?}",
+                            mls_identity.ciphersuite
+                        );
+
+                        // Create configuration for joining a group
+                        let mls_group_join_config = MlsGroupJoinConfig::default();
+
+                        // FIXED: Use the shared crypto provider that has our stored keys
+                        let provider = mls_identity.crypto_provider.as_ref();
+                        debug!("Using shared crypto provider with stored keys");
+
+                        // Stage the Welcome message first
+                        debug!("Attempting to stage Welcome message...");
+                        let staged_welcome = match StagedWelcome::new_from_welcome(
+                            provider,
+                            &mls_group_join_config,
+                            welcome,
+                            None, // ratchet_tree - typically not needed for basic joins
+                        ) {
+                            Ok(sw) => {
+                                debug!("✓ Successfully staged Welcome message");
+                                sw
+                            }
+                            Err(e) => {
+                                error!(
+                                    "✗ Failed to stage Welcome message with shared provider: {:?}",
+                                    e
+                                );
+                                error!("Error type: {}", std::any::type_name_of_val(&e));
+                                return Err(e.into());
+                            }
+                        };
+
+                        // Convert staged welcome into an MlsGroup
+                        let mls_group = staged_welcome.into_group(provider)?;
+
+                        // Extract group name from extensions, or generate from group ID if not found
+                        let group_name = if let Some(name) = Self::get_group_name(&mls_group) {
+                            debug!("Successfully extracted group name {name}");
+                            name
+                        } else {
+                            return Err(StateActorError::GroupNotFound);
+                        };
+
+                        debug!("Successfully joined group: {}", group_name);
+
+                        // Store the group in our groups map
+                        self.groups.insert(group_name.clone(), mls_group);
+
+                        // Set as active group
+                        self.active_group = Some(group_name.clone());
+
+                        Ok(StateActorReply::Success(format!(
+                            "Successfully joined group: {}",
+                            group_name
+                        )))
                     }
                     _ => Err(StateActorError::InvalidReceivedMessage),
                 }
             }
         }
+    }
+
+    /// Extract group name from MlsGroup extensions
+    fn get_group_name(group: &MlsGroup) -> Option<String> {
+        const GROUP_NAME_EXTENSION_ID: u16 = 13;
+
+        // Get the group context extensions
+        let extensions = group.extensions();
+
+        // Find the specific extension by type
+        let group_name_ext_type = ExtensionType::from(GROUP_NAME_EXTENSION_ID);
+
+        extensions.iter().find_map(|ext| {
+            match ext {
+                Extension::Unknown(ext_type, unknown_ext) => {
+                    // Check if this is our group name extension
+                    if *ext_type == Into::<u16>::into(group_name_ext_type) {
+                        // Extract the bytes from UnknownExtension
+                        let name_bytes = &unknown_ext.0;
+                        // Convert bytes to String
+                        String::from_utf8(name_bytes.clone()).ok()
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        })
     }
 
     /// Helper method to create a UserAnnouncement protobuf message
@@ -440,6 +591,7 @@ impl StateActor {
         let mls_group_create_config = MlsGroupCreateConfig::builder()
             .ciphersuite(mls_identity.ciphersuite)
             .with_group_context_extensions(extensions)?
+            .use_ratchet_tree_extension(true) // Include ratchet tree in Welcome messages
             .build();
 
         // Create the group with default configuration

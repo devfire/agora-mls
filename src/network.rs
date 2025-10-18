@@ -326,10 +326,7 @@ impl NetworkManager {
         let packet = ProtoMlsMessageIn::decode(&buffer[..len])
             .context(format!("Failed to decode packet from {}", remote_addr))?;
 
-        debug!(
-            "Received {} bytes from {} (decoded to packet: {:?})",
-            len, remote_addr, packet
-        );
+        debug!("Received {} bytes from {}", len, remote_addr);
 
         Ok(packet)
     }
