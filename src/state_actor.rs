@@ -435,16 +435,81 @@ impl StateActor {
                         }
                     }
 
-                    MlsMessageBodyIn::Welcome(_welcome) => {
+                    MlsMessageBodyIn::Welcome(welcome) => {
                         debug!("Received Welcome message - processing group join");
-                        // Handle Welcome messages for joining groups
-                        // This would be used when this client wants to join a group
-                        Err(StateActorError::NotImplemented)
+
+                        // Get MLS identity (not currently used but may be needed for future enhancements)
+                        // let _mls_identity =
+                        //     self.mls_identity_actor.ask(OpenMlsIdentityRequest).await?;
+
+                        // Create configuration for joining a group
+                        let mls_group_join_config = MlsGroupJoinConfig::default();
+
+                        // Stage the Welcome message first
+                        let staged_welcome = StagedWelcome::new_from_welcome(
+                            &OpenMlsRustCrypto::default(),
+                            &mls_group_join_config,
+                            welcome,
+                            None, // ratchet_tree - typically not needed for basic joins
+                        )?;
+
+                        // Convert staged welcome into an MlsGroup
+                        let mls_group = staged_welcome.into_group(&OpenMlsRustCrypto::default())?;
+
+                        // Extract group name from extensions, or generate from group ID if not found
+                        let group_name = Self::get_group_name(&mls_group).unwrap_or_else(|| {
+                            // Fallback: use a portion of group ID as name if extension not found
+                            format!(
+                                "group-{}",
+                                hex::encode(&mls_group.group_id().as_slice()[..8])
+                            )
+                        });
+
+                        debug!("Successfully joined group: {}", group_name);
+
+                        // Store the group in our groups map
+                        self.groups.insert(group_name.clone(), mls_group);
+
+                        // Set as active group
+                        self.active_group = Some(group_name.clone());
+
+                        Ok(StateActorReply::Success(format!(
+                            "Successfully joined group: {}",
+                            group_name
+                        )))
                     }
                     _ => Err(StateActorError::InvalidReceivedMessage),
                 }
             }
         }
+    }
+
+    /// Extract group name from MlsGroup extensions
+    fn get_group_name(group: &MlsGroup) -> Option<String> {
+        const GROUP_NAME_EXTENSION_ID: u16 = 13;
+
+        // Get the group context extensions
+        let extensions = group.extensions();
+
+        // Find the specific extension by type
+        let group_name_ext_type = ExtensionType::from(GROUP_NAME_EXTENSION_ID);
+
+        extensions.iter().find_map(|ext| {
+            match ext {
+                Extension::Unknown(ext_type, unknown_ext) => {
+                    // Check if this is our group name extension
+                    if *ext_type == Into::<u16>::into(group_name_ext_type) {
+                        // Extract the bytes from UnknownExtension
+                        let name_bytes = &unknown_ext.0;
+                        // Convert bytes to String
+                        String::from_utf8(name_bytes.clone()).ok()
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        })
     }
 
     /// Helper method to create a UserAnnouncement protobuf message

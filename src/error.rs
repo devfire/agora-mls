@@ -2,7 +2,7 @@ use core::convert::Infallible;
 use kameo::error::SendError;
 use openmls::{
     group::{AddMembersError, CreateMessageError, MergeCommitError, ProcessMessageError},
-    prelude::KeyPackageVerifyError,
+    prelude::{KeyPackageVerifyError, WelcomeError},
 };
 use openmls_rust_crypto::MemoryStorageError;
 use prost::DecodeError;
@@ -116,6 +116,9 @@ pub enum StateActorError {
 
     #[error("Failed to add member")]
     AddMemberFailed(#[from] AddMembersError<MemoryStorageError>),
+
+    #[error("Failed to process Welcome message")]
+    WelcomeError(#[from] WelcomeError<MemoryStorageError>),
 }
 
 #[derive(Error, Debug)]
