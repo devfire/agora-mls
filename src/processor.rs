@@ -7,7 +7,7 @@ use tracing::{debug, error};
 use crate::{
     command::Command,
     network,
-    state_actor::{StateActor, StateActorMessage, StateActorReply},
+    // state_actor::{StateActor, StateActorMessage, StateActorReply},
 };
 
 pub struct Processor {
@@ -236,7 +236,7 @@ impl Processor {
                                     active_group
                                 } else {
                                     debug!("No active group");
-                                    crate::error::StateActorError::NoActiveGroup.to_string()
+                                    String::from("No active group.")
                                 };
                                 display_sender.send(active_group).await.expect(
                                     "Unable to send responses from spawn_command_handler_task",

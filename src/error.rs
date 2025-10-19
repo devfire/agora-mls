@@ -69,71 +69,71 @@ pub enum NetworkError {
     InterfaceError { interface: String, message: String },
 }
 
-#[derive(Error, Debug)] // Note: Removed Clone, as some inner errors aren't clonable
-pub enum StateActorError {
-    #[error("User not found")]
-    UserNotFound,
+// #[derive(Error, Debug)] // Note: Removed Clone, as some inner errors aren't clonable
+// pub enum StateActorError {
+//     #[error("User not found")]
+//     UserNotFound,
 
-    #[error("Channel not found")]
-    ChannelNotFound,
+//     #[error("Channel not found")]
+//     ChannelNotFound,
 
-    #[error("Safety number generation failed")]
-    SafetyNumberGenerationFailed,
+//     #[error("Safety number generation failed")]
+//     SafetyNumberGenerationFailed,
 
-    #[error("No active group")]
-    NoActiveGroup,
+//     #[error("No active group")]
+//     NoActiveGroup,
 
-    #[error("Actor communication failed: {0}")]
-    ActorCommError(String),
+//     #[error("Actor communication failed: {0}")]
+//     ActorCommError(String),
 
-    #[error("Failed to create MLS message: {0}")]
-    MlsCreateMessageError(#[from] CreateMessageError),
+//     #[error("Failed to create MLS message: {0}")]
+//     MlsCreateMessageError(#[from] CreateMessageError),
 
-    #[error("Failed to process MLS message: {0}")]
-    MlsProcessMessageError(#[from] ProcessMessageError<Infallible>),
+//     #[error("Failed to process MLS message: {0}")]
+//     MlsProcessMessageError(#[from] ProcessMessageError<Infallible>),
 
-    #[error("Failed to store: {0}")]
-    MlsMergeStorageError(#[from] MergeCommitError<MemoryStorageError>),
+//     #[error("Failed to store: {0}")]
+//     MlsMergeStorageError(#[from] MergeCommitError<MemoryStorageError>),
 
-    #[error("Failed to convert to/from Protobuf: {0}")]
-    ProtobufConversionError(#[from] ProtobufWrapperError),
+//     #[error("Failed to convert to/from Protobuf: {0}")]
+//     ProtobufConversionError(#[from] ProtobufWrapperError),
 
-    #[error("Invalid message received from network")]
-    InvalidReceivedMessage,
+//     #[error("Invalid message received from network")]
+//     InvalidReceivedMessage,
 
-    #[error("Failed to decode message as UTF-8: {0}")]
-    InvalidUtf8(#[from] std::string::FromUtf8Error),
+//     #[error("Failed to decode message as UTF-8: {0}")]
+//     InvalidUtf8(#[from] std::string::FromUtf8Error),
 
-    #[error("Feature not implemented")]
-    NotImplemented,
+//     #[error("Feature not implemented")]
+//     NotImplemented,
 
-    #[error("Missing verifying key in identity actor")]
-    MissingVerifyingKey,
+//     #[error("Missing verifying key in identity actor")]
+//     MissingVerifyingKey,
 
-    #[error("Invalid credential or missing required extension")]
-    InvalidCredential,
+//     #[error("Invalid credential or missing required extension")]
+//     InvalidCredential,
 
-    #[error("Failed to serialize MLS message to bytes")]
-    MlsMessageError(#[from] openmls::framing::errors::MlsMessageError),
+//     #[error("Failed to serialize MLS message to bytes")]
+//     MlsMessageError(#[from] openmls::framing::errors::MlsMessageError),
 
-    #[error("Failed to deserialize MLS packet")]
-    MlsDeserializeError(#[from] openmls::prelude::Error),
+//     #[error("Failed to deserialize MLS packet")]
+//     MlsDeserializeError(#[from] openmls::prelude::Error),
 
-    #[error("Failed to store MLS")]
-    MlsProcessStorageError(#[from] ProcessMessageError<MemoryStorageError>),
+//     #[error("Failed to store MLS")]
+//     MlsProcessStorageError(#[from] ProcessMessageError<MemoryStorageError>),
 
-    #[error("Failed to validate KeyPackage")]
-    KeyPackageValidationFailed(#[from] KeyPackageVerifyError),
+//     #[error("Failed to validate KeyPackage")]
+//     KeyPackageValidationFailed(#[from] KeyPackageVerifyError),
 
-    #[error("Invalid composite key format (expected username@fingerprint)")]
-    InvalidCompositeKey,
+//     #[error("Invalid composite key format (expected username@fingerprint)")]
+//     InvalidCompositeKey,
 
-    #[error("Failed to process Welcome message")]
-    WelcomeError(#[from] WelcomeError<MemoryStorageError>),
+//     #[error("Failed to process Welcome message")]
+//     WelcomeError(#[from] WelcomeError<MemoryStorageError>),
 
-    #[error("Failed to merge pending commit: {0}")]
-    MlsMergePendingCommitError(#[from] MergePendingCommitError<MemoryStorageError>),
-}
+//     #[error("Failed to merge pending commit: {0}")]
+//     MlsMergePendingCommitError(#[from] MergePendingCommitError<MemoryStorageError>),
+// }
 
 #[derive(Error, Debug)]
 pub enum SafetyNumberError {
@@ -158,19 +158,19 @@ pub enum ProtobufWrapperError {
     MlsMessageInvalid(#[from] openmls::framing::errors::MlsMessageError),
 }
 
-// Add this implementation at the bottom of the file
-// Replace the previous `impl From<KameoError>` with this generic one
-impl<M> From<SendError<M>> for StateActorError {
-    fn from(err: SendError<M>) -> Self {
-        let err_msg = match err {
-            SendError::ActorNotRunning(_) => "Actor not running".to_string(),
-            SendError::ActorStopped => "Actor stopped before a reply could be received".to_string(),
-            SendError::MailboxFull(_) => "Actor's mailbox is full".to_string(),
-            SendError::HandlerError(_) => {
-                "An error occurred within the actor's handler".to_string()
-            }
-            SendError::Timeout(_) => "Timed out waiting for a reply".to_string(),
-        };
-        StateActorError::ActorCommError(err_msg)
-    }
-}
+// // Add this implementation at the bottom of the file
+// // Replace the previous `impl From<KameoError>` with this generic one
+// impl<M> From<SendError<M>> for StateActorError {
+//     fn from(err: SendError<M>) -> Self {
+//         let err_msg = match err {
+//             SendError::ActorNotRunning(_) => "Actor not running".to_string(),
+//             SendError::ActorStopped => "Actor stopped before a reply could be received".to_string(),
+//             SendError::MailboxFull(_) => "Actor's mailbox is full".to_string(),
+//             SendError::HandlerError(_) => {
+//                 "An error occurred within the actor's handler".to_string()
+//             }
+//             SendError::Timeout(_) => "Timed out waiting for a reply".to_string(),
+//         };
+//         StateActorError::ActorCommError(err_msg)
+//     }
+// }

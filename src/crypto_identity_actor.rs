@@ -3,12 +3,11 @@ use std::{collections::HashMap, fs, path::Path, sync::Arc};
 use anyhow::{Context, Result, anyhow};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use kameo::prelude::*;
-use openmls::{group, prelude::*};
+use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::OpenMlsRustCrypto;
 use ssh_key::PrivateKey;
 use zeroize::Zeroizing;
-
 
 /// Combined actor managing both SSH identity and MLS protocol state.
 /// All private keys are encapsulated and never exposed via messages.
@@ -48,8 +47,7 @@ pub enum CryptoIdentityMessage {
     GetKeyPackage,
     /// Request signature operation (signing happens internally)
     SignData { data: Vec<u8> },
-    /// Update display name/handle
-    UpdateHandle { new_handle: String },
+
     /// Get MLS identity information (TEMPORARY - for backward compatibility)
     GetMlsIdentity,
 
@@ -60,9 +58,7 @@ pub enum CryptoIdentityMessage {
     /// Add a member to the active group
     AddMember { key_package: KeyPackage },
     /// Encrypt a message for the current active group
-    EncryptMessage {
-        plaintext: Vec<u8>,
-    },
+    EncryptMessage { plaintext: Vec<u8> },
     /// Process an incoming MLS message
     ProcessMessage { mls_message_in: MlsMessageIn },
     /// Join a group via Welcome message
@@ -98,9 +94,7 @@ pub enum CryptoIdentityReply {
 
     // === MLS Operation Replies (NEW - Phase 2) ===
     /// Group created successfully
-    GroupCreated {
-        group_name: String,
-    },
+    GroupCreated(GroupId),
     /// Member added successfully
     MemberAdded {
         commit: MlsMessageOut,
@@ -173,11 +167,6 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                 // Signing happens HERE - private key never leaves the actor
                 let signature = self.signing_key.sign(&data);
                 CryptoIdentityReply::Signature { signature }
-            }
-
-            CryptoIdentityMessage::UpdateHandle { new_handle } => {
-                self.handle = new_handle;
-                CryptoIdentityReply::UpdateComplete
             }
 
             CryptoIdentityMessage::GetMlsIdentity => CryptoIdentityReply::MlsIdentity {
@@ -287,9 +276,9 @@ impl CryptoIdentityActor {
 
         // Store the group and set as active
         self.groups.insert(group_id.clone(), group);
-        self.active_group = Some(group_id);
+        self.active_group = Some(group_id.clone());
 
-        CryptoIdentityReply::GroupCreated { group_name }
+        CryptoIdentityReply::GroupCreated(group_id)
     }
 
     /// Add a member to the active MLS group

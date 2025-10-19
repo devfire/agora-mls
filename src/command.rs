@@ -48,7 +48,7 @@ pub enum Command {
     /// Display information about current active group or set active group
     Group {
         /// Set group to active
-        name: Option<String>,
+        name: String,
     },
 
     /// Generate the safety number for the current identity
