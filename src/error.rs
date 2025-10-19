@@ -1,7 +1,10 @@
 use core::convert::Infallible;
 use kameo::error::SendError;
 use openmls::{
-    group::{AddMembersError, CreateMessageError, MergeCommitError, MergePendingCommitError, ProcessMessageError},
+    group::{
+        AddMembersError, CreateMessageError, MergeCommitError, MergePendingCommitError,
+        ProcessMessageError,
+    },
     prelude::{KeyPackageVerifyError, WelcomeError},
 };
 use openmls_rust_crypto::MemoryStorageError;
@@ -14,6 +17,29 @@ pub enum OpenSSHKeyError {
     #[error("Failed to read SSH key file: {ssh_key_file_path}")]
     MissingSshKeyFile { ssh_key_file_path: String },
 }
+
+// #[derive(Error, Debug)]
+// pub enum CryptoIdentityActorError {
+//     #[error("Group {0} not found")]
+//     GroupNotFound(String),
+
+//     #[error("Failed to set extensions {0}")]
+//     ExtensionError(String),
+
+//     #[error("Failed to create group: {0}")]
+//     GroupCreationFailed(String),
+
+//     #[error("Failed to add member")]
+//     AddMemberFailed(#[from] AddMembersError<MemoryStorageError>),
+
+//     #[error("Failed to merge staged commit {0}")]
+//     MlsMergeCommitError(String),
+
+//     #[error("Encryption failed: {0}")]
+//     MessageEncryptionFailed(String),
+
+
+// }
 
 #[derive(Error, Debug)]
 pub enum NetworkError {
@@ -48,14 +74,8 @@ pub enum StateActorError {
     #[error("User not found")]
     UserNotFound,
 
-    #[error("Group not found")]
-    GroupNotFound,
-
     #[error("Channel not found")]
     ChannelNotFound,
-
-    #[error("Failed to create group: {0}")]
-    GroupCreationFailed(#[from] anyhow::Error),
 
     #[error("Safety number generation failed")]
     SafetyNumberGenerationFailed,
@@ -71,9 +91,6 @@ pub enum StateActorError {
 
     #[error("Failed to process MLS message: {0}")]
     MlsProcessMessageError(#[from] ProcessMessageError<Infallible>),
-
-    #[error("Failed to merge staged commit: {0}")]
-    MlsMergeCommitError(#[from] MergeCommitError<Infallible>),
 
     #[error("Failed to store: {0}")]
     MlsMergeStorageError(#[from] MergeCommitError<MemoryStorageError>),
@@ -96,9 +113,6 @@ pub enum StateActorError {
     #[error("Invalid credential or missing required extension")]
     InvalidCredential,
 
-    #[error("Encryption failed")]
-    EncryptionFailed,
-
     #[error("Failed to serialize MLS message to bytes")]
     MlsMessageError(#[from] openmls::framing::errors::MlsMessageError),
 
@@ -113,9 +127,6 @@ pub enum StateActorError {
 
     #[error("Invalid composite key format (expected username@fingerprint)")]
     InvalidCompositeKey,
-
-    #[error("Failed to add member")]
-    AddMemberFailed(#[from] AddMembersError<MemoryStorageError>),
 
     #[error("Failed to process Welcome message")]
     WelcomeError(#[from] WelcomeError<MemoryStorageError>),

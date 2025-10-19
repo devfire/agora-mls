@@ -17,11 +17,8 @@ use crate::{
 
 #[derive(Actor)]
 pub struct StateActor {
-    // membership: HashMap<VerifyingKey, Vec<Group>>, // Maps handle to channels
-    groups: HashMap<String, MlsGroup>, // Maps group name to MlsGroup
-    active_group: Option<String>,      // Currently active group name, if any
     crypto_identity: ActorRef<CryptoIdentityActor>, // Combined identity and MLS actor
-    key_packages: HashMap<String, KeyPackageIn>, // composite_key -> KeyPackageIn cache
+    key_packages: HashMap<String, KeyPackageIn>,    // composite_key -> KeyPackageIn cache
 }
 
 pub enum StateActorMessage {
@@ -116,12 +113,29 @@ impl StateActor {
             StateActorMessage::Command(command) => {
                 match command {
                     Command::Create { name } => {
-                        self.create_mls_group(&name).await?;
-
-                        debug!("Successfully created MLS group '{}'", name);
-                        Ok(StateActorReply::Success(
-                            "Successfully created MLS group".to_string(),
-                        ))
+                        // Delegate to CryptoIdentityActor - all MLS operations happen there
+                        match self
+                            .crypto_identity
+                            .ask(CryptoIdentityMessage::CreateGroup {
+                                group_name: name.clone(),
+                            })
+                            .await
+                        {
+                            Ok(CryptoIdentityReply::GroupCreated { group_name }) => {
+                                debug!("Successfully created MLS group '{}'", group_name);
+                                Ok(StateActorReply::Success(
+                                    "Successfully created MLS group".to_string(),
+                                ))
+                            }
+                            Ok(CryptoIdentityReply::Failure { message }) => {
+                                Err(StateActorError::EncryptionFailed)
+                            }
+                            Ok(_) => Err(StateActorError::EncryptionFailed),
+                            Err(e) => {
+                                error!("Failed to create group: {}", e);
+                                Err(StateActorError::EncryptionFailed)
+                            }
+                        }
                     }
 
                     Command::Safety => {
@@ -131,7 +145,9 @@ impl StateActor {
                             .ask(CryptoIdentityMessage::GetIdentity)
                             .await
                         {
-                            Ok(CryptoIdentityReply::Identity { verifying_key, .. }) => verifying_key,
+                            Ok(CryptoIdentityReply::Identity { verifying_key, .. }) => {
+                                verifying_key
+                            }
                             Ok(_) => {
                                 error!("Unexpected reply type from CryptoIdentityActor");
                                 return Err(StateActorError::MissingVerifyingKey);
@@ -153,26 +169,49 @@ impl StateActor {
                     }
                     Command::Group { name: group_name } => {
                         if let Some(name) = group_name {
-                            // User wants to set the active group
-                            if self.groups.contains_key(&name) {
-                                self.active_group = Some(name);
-                                Ok(StateActorReply::Success("Group found.".to_string()))
-                            } else {
-                                Err(StateActorError::GroupNotFound)
+                            // User wants to set the active group - delegate to CryptoIdentityActor
+                            match self
+                                .crypto_identity
+                                .ask(CryptoIdentityMessage::SetActiveGroup { group_id: name })
+                                .await
+                            {
+                                Ok(CryptoIdentityReply::Success) => {
+                                    Ok(StateActorReply::Success("Group set as active.".to_string()))
+                                }
+                                Ok(CryptoIdentityReply::Failure { .. }) => {
+                                    Err(StateActorError::GroupNotFound)
+                                }
+                                Ok(_) => Err(StateActorError::GroupNotFound),
+                                Err(e) => {
+                                    error!("Failed to set active group: {}", e);
+                                    Err(StateActorError::GroupNotFound)
+                                }
                             }
                         } else {
-                            // User wants to get the current active group
-                            if let Some(active_name) = &self.active_group {
-                                Ok(StateActorReply::ActiveGroup(Some(active_name.clone())))
-                            } else {
-                                // This should not happen; active_group should always be in groups
-                                Ok(StateActorReply::ActiveGroup(None))
+                            // User wants to get the current active group - delegate to CryptoIdentityActor
+                            match self
+                                .crypto_identity
+                                .ask(CryptoIdentityMessage::GetActiveGroup)
+                                .await
+                            {
+                                Ok(CryptoIdentityReply::ActiveGroup { group_id: group_name }) => {
+                                    Ok(StateActorReply::ActiveGroup(group_name))
+                                }
+                                Ok(_) => Ok(StateActorReply::ActiveGroup(None)),
+                                Err(e) => {
+                                    error!("Failed to get active group: {}", e);
+                                    Ok(StateActorReply::ActiveGroup(None))
+                                }
                             }
                         }
                     }
                     Command::Announce => {
-                        let CryptoIdentityReply::MlsIdentity { mls_key_package, .. } =
-                            self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await?
+                        let CryptoIdentityReply::MlsIdentity {
+                            mls_key_package, ..
+                        } = self
+                            .crypto_identity
+                            .ask(CryptoIdentityMessage::GetMlsIdentity)
+                            .await?
                         else {
                             return Err(StateActorError::EncryptionFailed);
                         };
@@ -194,10 +233,8 @@ impl StateActor {
                             .map_err(|_e| StateActorError::EncryptionFailed)?;
 
                         // Create UserAnnouncement protobuf (consistent with try_into pattern)
-                        let proto_message = Self::create_user_announcement(
-                            handle,
-                            key_package_bytes,
-                        );
+                        let proto_message =
+                            Self::create_user_announcement(handle, key_package_bytes);
 
                         // a quick vec to be shipped back
                         let reply_vec = vec![proto_message];
@@ -213,69 +250,78 @@ impl StateActor {
                     }
 
                     Command::Invite { nick, password: _p } => {
-                        let CryptoIdentityReply::MlsIdentity {
-                            crypto_provider,
-                            signature_keypair,
-                            ..
-                        } = self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await? else {
+                        // Check if the user being invited is known
+                        let key_package_in = match self.key_packages.get(&nick) {
+                            Some(kp) => kp,
+                            None => return Err(StateActorError::UserNotFound),
+                        };
+
+                        // Get active group name
+                        let CryptoIdentityReply::ActiveGroup { group_id: group_name } = self
+                            .crypto_identity
+                            .ask(CryptoIdentityMessage::GetActiveGroup)
+                            .await?
+                        else {
                             return Err(StateActorError::EncryptionFailed);
                         };
 
-                        // first check if the user being invited is known.
-                        // If not, we bail - no user, no key package - no invite.
-                        let key_package_in = match self.key_packages.get(&nick) {
-                            Some(key_package_in) => key_package_in,
-                            None => {
-                                return Err(StateActorError::UserNotFound);
-                            }
-                        };
-
-                        // verified the user, let's get the current group name
-                        let current_group_name = match &self.active_group {
-                            Some(g) => g,
-                            None => {
-                                return Err(StateActorError::NoActiveGroup);
-                            }
-                        };
-
-                        // now we get the MlsGroup data for the group
-                        let current_mls_group_details =
-                            match self.groups.get_mut(current_group_name) {
-                                Some(mls_group) => mls_group,
-                                None => return Err(StateActorError::GroupNotFound),
-                            };
+                        let current_group_name =
+                            group_name.ok_or(StateActorError::NoActiveGroup)?;
 
                         // Validate the KeyPackageIn to get a KeyPackage
                         let validated_key_package = key_package_in
                             .clone()
                             .validate(&RustCrypto::default(), ProtocolVersion::Mls10)?;
 
-                        // guess we got the user, let's invite them
-                        let (mls_message_out, welcome, _group_info) = current_mls_group_details
-                            .add_members(
-                                crypto_provider.as_ref(),
-                                &*signature_keypair,
-                                core::slice::from_ref(&validated_key_package),
-                            )?;
-
-                        // CRITICAL: Merge the pending commit so Alice's group advances to the new epoch
-                        current_mls_group_details
-                            .merge_pending_commit(crypto_provider.as_ref())?;
-                        debug!(
-                            "Merged pending commit after adding members - group now at epoch {}",
-                            current_mls_group_details.epoch()
-                        );
-
-                        let reply_vec = vec![mls_message_out.try_into()?, welcome.try_into()?];
-                        // Return wrapped message for network multicast
-                        Ok(StateActorReply::MlsMessageOut(reply_vec))
-                        // Ok(StateActorReply::Success("User invited".to_string()))
+                        // Delegate to CryptoIdentityActor - add member operation happens there
+                        match self
+                            .crypto_identity
+                            .ask(CryptoIdentityMessage::AddMember {
+                                group_name: current_group_name,
+                                key_package: validated_key_package,
+                            })
+                            .await
+                        {
+                            Ok(CryptoIdentityReply::MemberAdded {
+                                commit, welcome, ..
+                            }) => {
+                                debug!("Successfully added member to group");
+                                // Convert to protobuf messages for network transmission
+                                let reply_vec = vec![commit.try_into()?, welcome.try_into()?];
+                                Ok(StateActorReply::MlsMessageOut(reply_vec))
+                            }
+                            Ok(CryptoIdentityReply::Failure { message }) => {
+                                error!("Failed to add member: {}", message);
+                                Err(StateActorError::EncryptionFailed)
+                            }
+                            Ok(_) => Err(StateActorError::EncryptionFailed),
+                            Err(e) => {
+                                error!("Failed to add member: {}", e);
+                                Err(StateActorError::EncryptionFailed)
+                            }
+                        }
                     }
 
                     Command::Groups => {
-                        let groups: Vec<String> = self.groups.keys().cloned().collect();
-
-                        Ok(StateActorReply::Groups(Some(groups)))
+                        // Delegate to CryptoIdentityActor - groups are managed there now
+                        match self
+                            .crypto_identity
+                            .ask(CryptoIdentityMessage::ListGroups)
+                            .await
+                        {
+                            Ok(CryptoIdentityReply::Groups { groups }) => {
+                                if groups.is_empty() {
+                                    Ok(StateActorReply::Groups(None))
+                                } else {
+                                    Ok(StateActorReply::Groups(Some(groups)))
+                                }
+                            }
+                            Ok(_) => Err(StateActorError::EncryptionFailed),
+                            Err(e) => {
+                                error!("Failed to list groups: {}", e);
+                                Err(StateActorError::EncryptionFailed)
+                            }
+                        }
                     }
                     _ => Err(StateActorError::NotImplemented),
                 }
@@ -283,37 +329,40 @@ impl StateActor {
             StateActorMessage::Encrypt(plaintext_payload) => {
                 debug!("Encrypting message for transport");
 
-                let CryptoIdentityReply::MlsIdentity {
-                    crypto_provider,
-                    signature_keypair,
-                    ..
-                } = self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await? else {
+                // Get active group name from CryptoIdentityActor
+                let CryptoIdentityReply::ActiveGroup { group_id: group_name } = self
+                    .crypto_identity
+                    .ask(CryptoIdentityMessage::GetActiveGroup)
+                    .await?
+                else {
                     return Err(StateActorError::EncryptionFailed);
                 };
 
-                // Let's get the active group name first
-                let active_group_name = self
-                    .active_group
-                    .as_ref()
-                    .ok_or(StateActorError::NoActiveGroup)?;
-                let mls_group_ref = self
-                    .groups
-                    .get_mut(active_group_name)
-                    .ok_or(StateActorError::GroupNotFound)?;
+                let active_group_name = group_name.ok_or(StateActorError::NoActiveGroup)?;
 
-                // OK, let's try to encrypt the message
-                let mls_msg_out = mls_group_ref.create_message(
-                    crypto_provider.as_ref(),
-                    &*signature_keypair,
-                    plaintext_payload.encode_to_vec().as_slice(),
-                )?;
-
-                let protobuf_message: ProtoMlsMessageOut = mls_msg_out.try_into()?;
-                // a quick vec to be shipped back
-                let reply_vec = vec![protobuf_message];
-
-                // Return wrapped message for network multicast
-                Ok(StateActorReply::MlsMessageOut(reply_vec))
+                // Delegate encryption to CryptoIdentityActor
+                match self
+                    .crypto_identity
+                    .ask(CryptoIdentityMessage::EncryptMessage {
+                        group_name: active_group_name,
+                        plaintext: plaintext_payload.encode_to_vec(),
+                    })
+                    .await
+                {
+                    Ok(CryptoIdentityReply::MessageEncrypted { ciphertext }) => {
+                        let protobuf_message: ProtoMlsMessageOut = ciphertext.try_into()?;
+                        Ok(StateActorReply::MlsMessageOut(vec![protobuf_message]))
+                    }
+                    Ok(CryptoIdentityReply::Failure { message }) => {
+                        error!("Failed to encrypt message: {}", message);
+                        Err(StateActorError::EncryptionFailed)
+                    }
+                    Ok(_) => Err(StateActorError::EncryptionFailed),
+                    Err(e) => {
+                        error!("Failed to encrypt message: {}", e);
+                        Err(StateActorError::EncryptionFailed)
+                    }
+                }
             }
             StateActorMessage::Decrypt(chat_packet) => {
                 // Check if this is a UserAnnouncement at the protobuf level first
@@ -362,25 +411,34 @@ impl StateActor {
 
                 match proto_in.extract() {
                     MlsMessageBodyIn::PublicMessage(msg) => {
-                        let CryptoIdentityReply::MlsIdentity { crypto_provider, .. } =
-                            self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await?
-                        else {
-                            return Err(StateActorError::EncryptionFailed);
-                        };
+                        // let CryptoIdentityReply::MlsIdentity {
+                        //     crypto_provider, ..
+                        // } = self
+                        //     .crypto_identity
+                        //     .ask(CryptoIdentityMessage::GetMlsIdentity)
+                        //     .await?
+                        // else {
+                        //     return Err(StateActorError::EncryptionFailed);
+                        // };
 
-                        let active_group_name = self
-                            .active_group
-                            .as_ref()
-                            .ok_or(StateActorError::NoActiveGroup)?;
-                        let mls_group_ref = self
-                            .groups
-                            .get_mut(active_group_name)
-                            .ok_or(StateActorError::GroupNotFound)?;
+                        // let active_group_name = match self
+                        //     .crypto_identity
+                        //     .ask(CryptoIdentityMessage::GetActiveGroup)
+                        //     .await
+                        // {
+                        //     Ok(CryptoIdentityReply::ActiveGroup { group_name }) => {
+                        //         group_name.ok_or(StateActorError::NoActiveGroup)
+                        //     }
+                        //     Err(e) => {
+                        //         error!("Failed to get active group: {}", e);
+                        //         Err(StateActorError::NoActiveGroup)
+                        //     }
+                        //     Ok(_) => unreachable!("WTf lol"),
+                        // }?;
+
                         let protocol_message = ProtocolMessage::from(msg);
-                        let processed_message = mls_group_ref.process_message(
-                            crypto_provider.as_ref(),
-                            protocol_message,
-                        )?;
+                        let processed_message = mls_group_ref
+                            .process_message(crypto_provider.as_ref(), protocol_message)?;
 
                         match processed_message.into_content() {
                             ProcessedMessageContent::ApplicationMessage(app_msg) => {
@@ -409,8 +467,12 @@ impl StateActor {
                         }
                     }
                     MlsMessageBodyIn::PrivateMessage(msg) => {
-                        let CryptoIdentityReply::MlsIdentity { crypto_provider, .. } =
-                            self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await?
+                        let CryptoIdentityReply::MlsIdentity {
+                            crypto_provider, ..
+                        } = self
+                            .crypto_identity
+                            .ask(CryptoIdentityMessage::GetMlsIdentity)
+                            .await?
                         else {
                             return Err(StateActorError::EncryptionFailed);
                         };
@@ -425,10 +487,8 @@ impl StateActor {
                             .groups
                             .get_mut(active_group_name)
                             .ok_or(StateActorError::GroupNotFound)?;
-                        let processed_message = mls_group_ref.process_message(
-                            crypto_provider.as_ref(),
-                            protocol_message,
-                        )?;
+                        let processed_message = mls_group_ref
+                            .process_message(crypto_provider.as_ref(), protocol_message)?;
 
                         match processed_message.into_content() {
                             ProcessedMessageContent::ApplicationMessage(app_msg) => {
@@ -461,16 +521,19 @@ impl StateActor {
                         debug!("Received Welcome message - processing group join");
 
                         // Get MLS identity to access the shared crypto provider
-                        let CryptoIdentityReply::MlsIdentity { crypto_provider, ciphersuite, .. } =
-                            self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await?
+                        let CryptoIdentityReply::MlsIdentity {
+                            crypto_provider,
+                            ciphersuite,
+                            ..
+                        } = self
+                            .crypto_identity
+                            .ask(CryptoIdentityMessage::GetMlsIdentity)
+                            .await?
                         else {
                             return Err(StateActorError::EncryptionFailed);
                         };
 
-                        debug!(
-                            "Retrieved MLS identity, ciphersuite: {:?}",
-                            ciphersuite
-                        );
+                        debug!("Retrieved MLS identity, ciphersuite: {:?}", ciphersuite);
 
                         // Create configuration for joining a group
                         let mls_group_join_config = MlsGroupJoinConfig::default();
@@ -580,63 +643,13 @@ impl StateActor {
     }
 }
 impl StateActor {
-    pub fn new(
-        crypto_identity: ActorRef<CryptoIdentityActor>,
-    ) -> Self {
+    pub fn new(crypto_identity: ActorRef<CryptoIdentityActor>) -> Self {
         Self {
             groups: HashMap::new(),
             active_group: None,
             crypto_identity,
             key_packages: HashMap::new(),
         }
-    }
-
-    async fn create_mls_group(&mut self, group_name: &str) -> anyhow::Result<()> {
-        const GROUP_NAME_EXTENSION_ID: u16 = 13;
-        let CryptoIdentityReply::MlsIdentity {
-            ciphersuite,
-            signature_keypair,
-            credential_with_key,
-            ..
-        } = self.crypto_identity.ask(CryptoIdentityMessage::GetMlsIdentity).await? else {
-            return Err(anyhow::anyhow!("Failed to get MLS identity"));
-        };
-
-        // 1. Define your custom group name as bytes
-        let group_name_bytes = group_name.as_bytes();
-        // 1. Wrap the raw bytes in the `UnknownExtension` struct.
-        let unknown_ext_data = UnknownExtension(group_name_bytes.to_vec());
-
-        // 2. Pass BOTH the type and the struct to the `Extension::Unknown` variant.
-        let group_name_extension = Extension::Unknown(
-            ExtensionType::from(GROUP_NAME_EXTENSION_ID).into(),
-            unknown_ext_data,
-        );
-
-        // 3. Continue with the configuration.
-        let extensions = Extensions::single(group_name_extension);
-
-        let mls_group_create_config = MlsGroupCreateConfig::builder()
-            .ciphersuite(ciphersuite)
-            .with_group_context_extensions(extensions)?
-            .use_ratchet_tree_extension(true) // Include ratchet tree in Welcome messages
-            .build();
-
-        // Create the group with default configuration
-        let group = openmls::group::MlsGroup::new(
-            &openmls_rust_crypto::OpenMlsRustCrypto::default(),
-            &*signature_keypair,
-            &mls_group_create_config,
-            credential_with_key,
-        )?;
-
-        // Add the group to the HashMap
-        self.groups.insert(group_name.to_owned(), group);
-
-        // Set the active group appropriately
-        self.active_group = Some(group_name.to_owned());
-
-        Ok(())
     }
 }
 
