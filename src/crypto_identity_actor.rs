@@ -5,7 +5,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use kameo::prelude::*;
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
-use openmls_rust_crypto::OpenMlsRustCrypto;
+use openmls_rust_crypto::{OpenMlsRustCrypto, RustCrypto};
 use ssh_key::PrivateKey;
 use zeroize::Zeroizing;
 
@@ -30,9 +30,12 @@ pub struct CryptoIdentityActor {
     signature_keypair: Arc<SignatureKeyPair>,
     crypto_provider: Arc<OpenMlsRustCrypto>,
 
-    // === MLS Group Management (MOVED from StateActor for security) ===
+    // === MLS Group Management ===
     groups: HashMap<GroupId, MlsGroup>,
     active_group: Option<GroupId>,
+
+    // == User nick to KeyPackage mapping ===
+    user_cache: HashMap<UserIdentity, KeyPackageIn>,
 }
 
 // ============================================================================
@@ -41,15 +44,15 @@ pub struct CryptoIdentityActor {
 
 #[derive(Debug)]
 pub enum CryptoIdentityMessage {
-    /// Get public identity information (handle, verifying_key)
-    GetIdentity,
-    /// Get MLS key package for invites
-    GetKeyPackage,
-    /// Request signature operation (signing happens internally)
-    SignData { data: Vec<u8> },
+    // /// Get public identity information (handle, verifying_key)
+    // GetIdentity,
+    // /// Get MLS key package for invites
+    // GetKeyPackage,
+    // /// Request signature operation (signing happens internally)
+    // SignData { data: Vec<u8> },
 
-    /// Get MLS identity information (TEMPORARY - for backward compatibility)
-    GetMlsIdentity,
+    // /// Get MLS identity information (TEMPORARY - for backward compatibility)
+    // GetMlsIdentity,
 
     // === MLS Group Operations ===
     /// Create a new MLS group
@@ -58,7 +61,7 @@ pub enum CryptoIdentityMessage {
     /// Add a member to the active group
     AddMember { key_package: KeyPackage },
     /// Encrypt a message for the current active group
-    EncryptMessage { plaintext: Vec<u8> },
+    EncryptMessage(Vec<u8>),
     /// Process an incoming MLS message
     ProcessMessage { mls_message_in: MlsMessageIn },
     /// Join a group via Welcome message
@@ -69,6 +72,9 @@ pub enum CryptoIdentityMessage {
     GetActiveGroup,
     /// Set the active group
     SetActiveGroup(GroupId),
+
+    /// Handle user invites
+    InviteUser(UserIdentity),
 }
 
 #[derive(Reply)]
@@ -85,12 +91,12 @@ pub enum CryptoIdentityReply {
         signature: Signature,
     },
     UpdateComplete,
-    MlsIdentity {
-        mls_key_package: KeyPackageBundle,
-        credential_with_key: CredentialWithKey,
-        ciphersuite: Ciphersuite,
-        crypto_provider: Arc<OpenMlsRustCrypto>,
-    },
+    // MlsIdentity {
+    //     mls_key_package: KeyPackageBundle,
+    //     credential_with_key: CredentialWithKey,
+    //     ciphersuite: Ciphersuite,
+    //     crypto_provider: Arc<OpenMlsRustCrypto>,
+    // },
 
     // === MLS Operation Replies (NEW - Phase 2) ===
     /// Group created successfully
@@ -102,9 +108,7 @@ pub enum CryptoIdentityReply {
         group_info: Option<Vec<u8>>, // Serialized GroupInfo
     },
     /// Message encrypted successfully
-    MessageEncrypted {
-        ciphertext: MlsMessageOut,
-    },
+    MlsMessageOut(MlsMessageOut),
     /// Message processed successfully
     MessageProcessed {
         result: ProcessedMessageResult,
@@ -153,48 +157,19 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
         _ctx: &mut kameo::message::Context<Self, Self::Reply>,
     ) -> Self::Reply {
         match msg {
-            CryptoIdentityMessage::GetIdentity => CryptoIdentityReply::Identity {
-                handle: self.handle.clone(),
-                verifying_key: self.verifying_key,
-            },
-
-            CryptoIdentityMessage::GetKeyPackage => CryptoIdentityReply::KeyPackage {
-                key_package: self.mls_key_package.key_package().clone(),
-                credential: self.credential_with_key.clone(),
-            },
-
-            CryptoIdentityMessage::SignData { data } => {
-                // Signing happens HERE - private key never leaves the actor
-                let signature = self.signing_key.sign(&data);
-                CryptoIdentityReply::Signature { signature }
-            }
-
-            CryptoIdentityMessage::GetMlsIdentity => CryptoIdentityReply::MlsIdentity {
-                mls_key_package: self.mls_key_package.clone(),
-                credential_with_key: self.credential_with_key.clone(),
-                ciphersuite: self.ciphersuite,
-                crypto_provider: self.crypto_provider.clone(),
-            },
-
-            // === MLS Group Operation Handlers ===
             CryptoIdentityMessage::CreateGroup { group_name } => {
                 self.handle_create_group(group_name)
             }
-
             CryptoIdentityMessage::AddMember { key_package } => {
                 self.handle_add_member_to_group(key_package)
             }
-
-            CryptoIdentityMessage::EncryptMessage { plaintext } => {
+            CryptoIdentityMessage::EncryptMessage(plaintext) => {
                 self.handle_encrypt_message(plaintext)
             }
-
             CryptoIdentityMessage::ProcessMessage { mls_message_in } => {
                 self.handle_process_message(mls_message_in)
             }
-
             CryptoIdentityMessage::JoinGroup { welcome } => self.handle_join_group(welcome),
-
             CryptoIdentityMessage::ListGroups =>
             // 1. Get list of group IDs
             // 2. Fetch the corresponding MlsGroup references from the HashMap
@@ -208,11 +183,9 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                         .collect(),
                 }
             }
-
             CryptoIdentityMessage::GetActiveGroup => CryptoIdentityReply::ActiveGroup {
                 group_id: self.active_group.clone(),
             },
-
             CryptoIdentityMessage::SetActiveGroup(group_id) => {
                 if self.groups.contains_key(&group_id) {
                     self.active_group = Some(group_id);
@@ -220,6 +193,9 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                 } else {
                     CryptoIdentityReply::Failure(anyhow!("Group not found"))
                 }
+            }
+            CryptoIdentityMessage::InviteUser(user_identity) => {
+                self.handle_invite_user(user_identity)
             }
         }
     }
@@ -355,9 +331,7 @@ impl CryptoIdentityActor {
             }
         };
 
-        CryptoIdentityReply::MessageEncrypted {
-            ciphertext: mls_message_out,
-        }
+        CryptoIdentityReply::MlsMessageOut(mls_message_out)
     }
 
     /// Process an incoming MLS message
@@ -500,6 +474,35 @@ impl CryptoIdentityActor {
         CryptoIdentityReply::GroupJoined { group_name }
     }
 
+    /// Handle the new user invite request
+    fn handle_invite_user(&mut self, user_identity: UserIdentity) -> CryptoIdentityReply {
+        // Check if we have the user in our cache
+        let key_package_in = match self.user_cache.get(&user_identity) {
+            Some(kp) => kp.clone(),
+            None => {
+                return CryptoIdentityReply::Failure(anyhow!(
+                    "User '{}' not found in cache",
+                    user_identity
+                ));
+            }
+        };
+
+        // Validate the KeyPackageIn
+        let validated_keypackage = match key_package_in.validate(&RustCrypto::default(), ProtocolVersion::Mls10) {
+            Ok(vkp) => vkp,
+            Err(e) => {
+                return CryptoIdentityReply::Failure(anyhow!(
+                    "Invalid KeyPackage for user '{}': {}",
+                    user_identity,
+                    e
+                ));
+            }
+        };
+
+        // Add the member to the active group
+        self.handle_add_member_to_group(validated_keypackage)
+    }
+
     /// Extract group name from MlsGroup extensions
     fn extract_group_name(group: &MlsGroup) -> Option<String> {
         const GROUP_NAME_EXTENSION_ID: u16 = 13;
@@ -593,6 +596,7 @@ impl CryptoIdentityActor {
             crypto_provider: provider,
             groups: HashMap::new(),
             active_group: None,
+            user_cache: HashMap::new(),
         })
     }
 
@@ -647,5 +651,33 @@ impl CryptoIdentityActor {
         let verifying_key = signing_key.verifying_key();
 
         Ok((signing_key, verifying_key))
+    }
+}
+
+use std::fmt;
+
+/// User identity combining username and key fingerprint
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UserIdentity {
+    pub username: String,
+    pub fingerprint: String,
+}
+
+impl UserIdentity {
+    /// Create from username and KeyPackageIn
+    pub fn from_key_package(username: &str, key_package: &KeyPackageIn) -> anyhow::Result<Self> {
+        let signature_key = key_package.unverified_credential().signature_key;
+        let fingerprint = hex::encode(&signature_key.as_slice()[..4]);
+        Ok(Self {
+            username: username.to_owned(),
+            fingerprint,
+        })
+    }
+}
+
+// Standard Display trait
+impl fmt::Display for UserIdentity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}@{}", self.username, self.fingerprint)
     }
 }

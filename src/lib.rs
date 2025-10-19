@@ -6,7 +6,6 @@ pub mod network;
 pub mod processor;
 pub mod command;
 pub mod crypto_identity_actor;
-pub mod state_actor;
 pub mod safety_number;
 pub mod protobuf_wrapper;
 

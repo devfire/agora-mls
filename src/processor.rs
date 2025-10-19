@@ -6,8 +6,8 @@ use tracing::{debug, error};
 
 use crate::{
     command::Command,
-    network,
-    // state_actor::{StateActor, StateActorMessage, StateActorReply},
+    crypto_identity_actor::{CryptoIdentityActor, CryptoIdentityMessage, CryptoIdentityReply},
+    network, // state_actor::{StateActor, StateActorMessage, StateActorReply},
 };
 
 pub struct Processor {
@@ -136,7 +136,7 @@ impl Processor {
     /// Spawn a task to handle messages from stdin and forward them to the network manager.
     pub fn spawn_message_handler_task(
         &self,
-        state_actor: ActorRef<StateActor>,
+        crypto_actor: ActorRef<CryptoIdentityActor>,
         mut receiver: tokio::sync::mpsc::Receiver<String>,
         message_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
@@ -148,18 +148,21 @@ impl Processor {
                 debug!("Message handler received: {:?}", message);
 
                 // Send to the state actor for encryption and multicast
-                match state_actor.ask(StateActorMessage::Encrypt(message)).await {
+                match crypto_actor
+                    .ask(CryptoIdentityMessage::EncryptMessage(message.into()))
+                    .await
+                {
                     Ok(reply) => {
                         debug!("Message dispatched successfully.");
                         match reply {
-                            StateActorReply::StateActorError(e) => {
+                            CryptoIdentityReply::Failure(e) => {
                                 debug!("ERROR: {e}");
                                 message_sender.send(e.to_string()).await.expect(
                                     "Unable to send an update from spawn_message_handler_task.",
                                 );
                             }
 
-                            StateActorReply::MlsMessageOut(proto_mls_msg_out) => {
+                            CryptoIdentityReply::MlsMessageOut(proto_mls_msg_out) => {
                                 // Send the packet(s) over the network
                                 for msg in proto_mls_msg_out {
                                     if let Err(e) = network_manager.send_message(msg).await {
@@ -184,7 +187,7 @@ impl Processor {
     /// We need this because spawn_stdin_input_task cannot send messages directly to the state actor which requires .await.
     pub fn spawn_command_handler_task(
         &self,
-        state_actor: ActorRef<StateActor>,
+        crypto_actor: ActorRef<CryptoIdentityActor>,
         mut receiver: tokio::sync::mpsc::Receiver<Command>,
         display_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
@@ -290,7 +293,7 @@ impl Processor {
     /// Spawn a task to continuously receive UDP multicast messages.
     pub fn spawn_udp_input_task(
         &self,
-        state_actor: ActorRef<StateActor>,
+        crypto_actor: ActorRef<CryptoIdentityActor>,
         display_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         let network_manager = Arc::clone(&self.network_manager);
@@ -303,7 +306,7 @@ impl Processor {
                     Ok(packet) => {
                         // debug!("Received network packet: {:?}", packet);
 
-                        match state_actor.ask(StateActorMessage::Decrypt(packet)).await {
+                        match crypto_actor.ask(StateActorMessage::Decrypt(packet)).await {
                             Ok(reply) => match reply {
                                 StateActorReply::DecryptedMessage(message) => {
                                     debug!("Decrypted message {message}");

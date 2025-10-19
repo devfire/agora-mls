@@ -4,7 +4,7 @@ use crate::{
     crypto_identity_actor::CryptoIdentityActor,
     network::{NetworkConfigBuilder, NetworkManager},
     processor::Processor,
-    state_actor::StateActor,
+    // state_actor::StateActor,
 };
 use anyhow::Result;
 use kameo::prelude::*;
@@ -52,9 +52,9 @@ impl App {
             &self.config.chat_id,
         )?);
 
-        let state_actor_ref = StateActor::spawn(StateActor::new(
-            crypto_identity_ref.clone(),
-        ));
+        // let state_actor_ref = StateActor::spawn(StateActor::new(
+        //     crypto_identity_ref.clone(),
+        // ));
 
         // Kick off the processor & share everything it needs
         let processor = Processor::new(self.config.chat_id.clone(), Arc::clone(&network_manager));
@@ -68,20 +68,20 @@ impl App {
         );
 
         let command_handle = processor.spawn_command_handler_task(
-            state_actor_ref.clone(),
+            crypto_identity_ref.clone(),
             command_receiver,
             display_sender.clone(),
         );
 
         let message_handle = processor.spawn_message_handler_task(
-            state_actor_ref.clone(),
+            crypto_identity_ref.clone(),
             message_receiver,
             display_sender.clone(),
         );
 
         // Start the UDP intake task to listen for incoming messages
         let udp_intake_handle =
-            processor.spawn_udp_input_task(state_actor_ref.clone(), display_sender.clone());
+            processor.spawn_udp_input_task(crypto_identity_ref.clone(), display_sender.clone());
 
         // Start the display task to show messages to the user
         let display_handle = processor.spawn_message_display_task(display_receiver);
