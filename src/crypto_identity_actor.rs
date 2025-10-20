@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
 use anyhow::{Context, Result, anyhow};
-use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
+use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use kameo::prelude::*;
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
@@ -12,9 +12,7 @@ use zeroize::Zeroizing;
 /// Combined actor managing both SSH identity and MLS protocol state.
 /// All private keys are encapsulated and never exposed via messages.
 ///
-/// This actor combines the functionality of IdentityActor and OpenMlsActor
-/// to prevent private key leakage across actor boundaries. The security model
-/// ensures that signing operations happen internally and only signatures or
+/// The security model ensures that signing operations happen internally and only signatures or
 /// public information is returned via messages.
 #[derive(Actor)]
 pub struct CryptoIdentityActor {
@@ -36,6 +34,8 @@ pub struct CryptoIdentityActor {
 
     // == User nick to KeyPackage mapping ===
     user_cache: HashMap<UserIdentity, KeyPackageIn>,
+
+    group_name_to_id: HashMap<String, GroupId>,
 }
 
 // ============================================================================
@@ -71,7 +71,7 @@ pub enum CryptoIdentityMessage {
     /// Get the active group name
     GetActiveGroup,
     /// Set the active group
-    SetActiveGroup(GroupId),
+    SetActiveGroup(String),
 
     /// Handle user invites
     InviteUser(UserIdentity),
@@ -186,12 +186,19 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
             CryptoIdentityMessage::GetActiveGroup => CryptoIdentityReply::ActiveGroup {
                 group_id: self.active_group.clone(),
             },
-            CryptoIdentityMessage::SetActiveGroup(group_id) => {
-                if self.groups.contains_key(&group_id) {
-                    self.active_group = Some(group_id);
+            CryptoIdentityMessage::SetActiveGroup(group_name) => {
+                // first we need to convert group name to group_id
+                let group_id = match self.group_name_to_id.get(&group_name) {
+                    Some(gid) => gid,
+                    None => {
+                        return CryptoIdentityReply::Failure(anyhow!("Unknown group {group_name}"));
+                    }
+                };
+                if self.groups.contains_key(group_id) {
+                    self.active_group = Some(group_id.clone());
                     CryptoIdentityReply::Success
                 } else {
-                    CryptoIdentityReply::Failure(anyhow!("Group not found"))
+                    CryptoIdentityReply::Failure(anyhow!("Group ID not found"))
                 }
             }
             CryptoIdentityMessage::InviteUser(user_identity) => {
@@ -253,6 +260,9 @@ impl CryptoIdentityActor {
         // Store the group and set as active
         self.groups.insert(group_id.clone(), group);
         self.active_group = Some(group_id.clone());
+
+        // Store the group name for future reference when the user wants to switch groups by name
+        self.group_name_to_id.insert(group_name, group_id.clone());
 
         CryptoIdentityReply::GroupCreated(group_id)
     }
@@ -488,16 +498,17 @@ impl CryptoIdentityActor {
         };
 
         // Validate the KeyPackageIn
-        let validated_keypackage = match key_package_in.validate(&RustCrypto::default(), ProtocolVersion::Mls10) {
-            Ok(vkp) => vkp,
-            Err(e) => {
-                return CryptoIdentityReply::Failure(anyhow!(
-                    "Invalid KeyPackage for user '{}': {}",
-                    user_identity,
-                    e
-                ));
-            }
-        };
+        let validated_keypackage =
+            match key_package_in.validate(&RustCrypto::default(), ProtocolVersion::Mls10) {
+                Ok(vkp) => vkp,
+                Err(e) => {
+                    return CryptoIdentityReply::Failure(anyhow!(
+                        "Invalid KeyPackage for user '{}': {}",
+                        user_identity,
+                        e
+                    ));
+                }
+            };
 
         // Add the member to the active group
         self.handle_add_member_to_group(validated_keypackage)
@@ -597,6 +608,7 @@ impl CryptoIdentityActor {
             groups: HashMap::new(),
             active_group: None,
             user_cache: HashMap::new(),
+            group_name_to_id: HashMap::new(),
         })
     }
 
@@ -671,6 +683,38 @@ impl UserIdentity {
         Ok(Self {
             username: username.to_owned(),
             fingerprint,
+        })
+    }
+
+    // /// Create from username and fingerprint string by splitting at '@'
+    // pub fn from_composite_string(identity_str: &str) -> anyhow::Result<Self> {
+    //     let parts: Vec<&str> = identity_str.split('@').collect();
+    //     if parts.len() != 2 {
+    //         return Err(anyhow!(
+    //             "Invalid identity format. Expected 'username@fingerprint'."
+    //         ));
+    //     }
+    //     Ok(Self {
+    //         username: parts[0].to_string(),
+    //         fingerprint: parts[1].to_string(),
+    //     })
+    // }
+}
+
+impl std::str::FromStr for UserIdentity {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.split('@').collect();
+        if parts.len() != 2 {
+            return Err(anyhow!(
+                "Invalid identity format. Expected 'username@fingerprint', got '{}'",
+                s
+            ));
+        }
+        Ok(Self {
+            username: parts[0].to_string(),
+            fingerprint: parts[1].to_string(),
         })
     }
 }

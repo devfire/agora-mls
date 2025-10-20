@@ -199,7 +199,7 @@ impl Processor {
                 debug!("Command handler received command: {:?}", command);
 
                 // Forward the command to the state actor and await the reply
-                match state_actor.ask(StateActorMessage::Command(command)).await {
+                match crypto_actor.ask(StateActorMessage::Command(command)).await {
                     Ok(reply) => {
                         match reply {
                             StateActorReply::ChatHandle(handle) => {

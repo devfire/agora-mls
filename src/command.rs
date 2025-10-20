@@ -1,6 +1,9 @@
 /// Possible input commands from the user.
 ///
 use clap::{Parser, Subcommand};
+use openmls::group::GroupId;
+
+use crate::crypto_identity_actor::{CryptoIdentityMessage, UserIdentity};
 
 #[derive(Parser, Debug)]
 #[command(disable_help_flag = true)]
@@ -108,5 +111,24 @@ impl Command {
         println!("│    /nick CoolUser                                       │");
         println!("│                                                         │");
         println!("╰─────────────────────────────────────────────────────────╯");
+    }
+}
+
+// In src/command.rs
+impl Command {
+    pub fn to_crypto_message(&self) -> Option<CryptoIdentityMessage> {
+        match self {
+            Command::Create { name } => Some(CryptoIdentityMessage::CreateGroup {
+                group_name: name.clone(),
+            }),
+            Command::Invite { nick, .. } => nick
+                .parse::<UserIdentity>()
+                .ok()
+                .map(CryptoIdentityMessage::InviteUser),
+            Command::Groups => Some(CryptoIdentityMessage::ListGroups),
+            Command::Group { name } => Some(CryptoIdentityMessage::SetActiveGroup(name.to_owned())),
+            // Non-crypto commands return None
+            _ => None,
+        }
     }
 }
