@@ -60,16 +60,22 @@ pub enum CryptoIdentityMessage {
 
     /// Add a member to the active group
     AddMember { key_package: KeyPackage },
+
     /// Encrypt a message for the current active group
     EncryptMessage(Vec<u8>),
+
     /// Process an incoming MLS message
     ProcessMessage { mls_message_in: MlsMessageIn },
+
     /// Join a group via Welcome message
     JoinGroup { welcome: Welcome },
+
     /// List all groups
     ListGroups,
+
     /// Get the active group name
     GetActiveGroup,
+
     /// Set the active group
     SetActiveGroup(String),
 
@@ -79,17 +85,17 @@ pub enum CryptoIdentityMessage {
 
 #[derive(Reply)]
 pub enum CryptoIdentityReply {
-    Identity {
-        handle: String,
-        verifying_key: VerifyingKey,
-    },
-    KeyPackage {
-        key_package: KeyPackage,
-        credential: CredentialWithKey,
-    },
-    Signature {
-        signature: Signature,
-    },
+    // Identity {
+    //     handle: String,
+    //     verifying_key: VerifyingKey,
+    // },
+    // KeyPackage {
+    //     key_package: KeyPackage,
+    //     credential: CredentialWithKey,
+    // },
+    // Signature {
+    //     signature: Signature,
+    // },
     UpdateComplete,
     // MlsIdentity {
     //     mls_key_package: KeyPackageBundle,
@@ -100,7 +106,7 @@ pub enum CryptoIdentityReply {
 
     // === MLS Operation Replies (NEW - Phase 2) ===
     /// Group created successfully
-    GroupCreated(GroupId),
+    GroupCreated(String),
     /// Member added successfully
     MemberAdded {
         commit: MlsMessageOut,
@@ -123,7 +129,7 @@ pub enum CryptoIdentityReply {
     },
     /// Active group name
     ActiveGroup {
-        group_id: Option<GroupId>,
+        group_name: Option<String>,
     },
     /// Generic success
     Success,
@@ -184,7 +190,12 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                 }
             }
             CryptoIdentityMessage::GetActiveGroup => CryptoIdentityReply::ActiveGroup {
-                group_id: self.active_group.clone(),
+                // get the active group name from the active group id
+                group_name: self.active_group.as_ref().and_then(|group_id| {
+                    self.groups
+                        .get(group_id)
+                        .and_then(|group| Self::extract_group_name(group))
+                }),
             },
             CryptoIdentityMessage::SetActiveGroup(group_name) => {
                 // first we need to convert group name to group_id
@@ -262,9 +273,10 @@ impl CryptoIdentityActor {
         self.active_group = Some(group_id.clone());
 
         // Store the group name for future reference when the user wants to switch groups by name
-        self.group_name_to_id.insert(group_name, group_id.clone());
+        self.group_name_to_id
+            .insert(group_name.clone(), group_id.clone());
 
-        CryptoIdentityReply::GroupCreated(group_id)
+        CryptoIdentityReply::GroupCreated(group_name)
     }
 
     /// Add a member to the active MLS group
