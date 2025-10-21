@@ -3,7 +3,10 @@ use std::{collections::HashMap, fs, path::Path, sync::Arc};
 use anyhow::{Context, Result, anyhow};
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use kameo::prelude::*;
-use openmls::prelude::{tls_codec::Deserialize, *};
+use openmls::prelude::{
+    tls_codec::{Deserialize, Serialize},
+    *,
+};
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::{OpenMlsRustCrypto, RustCrypto};
 use ssh_key::PrivateKey;
@@ -21,6 +24,7 @@ pub struct CryptoIdentityActor {
 
     username: String,
 
+    mls_key_package_bundle: KeyPackageBundle,
     credential_with_key: CredentialWithKey,
     signature_keypair: Arc<SignatureKeyPair>,
     crypto_provider: Arc<OpenMlsRustCrypto>,
@@ -235,7 +239,7 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
             CryptoIdentityMessage::InviteUser(user_identity) => {
                 self.handle_invite_user(user_identity)
             }
-            CryptoIdentityMessage::CreateAnnouncement => todo!(),
+            CryptoIdentityMessage::CreateAnnouncement => self.create_user_announcement(),
             CryptoIdentityMessage::AddNewUser { user_announcement } => {
                 self.handle_new_user_announcement(user_announcement)
             }
@@ -551,9 +555,15 @@ impl CryptoIdentityActor {
         self.handle_add_member_to_group(validated_keypackage)
     }
 
-    fn create_user_announcement(username: &str, key_package_bytes: Vec<u8>) -> CryptoIdentityReply {
+    fn create_user_announcement(&mut self) -> CryptoIdentityReply {
+        // Serialize the KeyPackage to bytes
+        let key_package_bytes = self
+            .mls_key_package_bundle
+            .key_package()
+            .tls_serialize_detached()
+            .expect("boo");
         let user_announcement = crate::agora_chat::UserAnnouncement {
-            username: username.to_string(),
+            username: self.username.clone(),
             tls_serialized_key_package: key_package_bytes,
         };
 
@@ -658,18 +668,19 @@ impl CryptoIdentityActor {
         };
 
         // Step 6: Build MLS key package
-        // let mls_key_package = KeyPackage::builder()
-        //     .build(
-        //         ciphersuite,
-        //         provider.as_ref(),
-        //         &signature_keypair,
-        //         credential_with_key.clone(),
-        //     )
-        //     .context("Failed to create MLS key package")?;
+        let mls_key_package_bundle = KeyPackage::builder()
+            .build(
+                ciphersuite,
+                provider.as_ref(),
+                &signature_keypair,
+                credential_with_key.clone(),
+            )
+            .context("Failed to create MLS key package")?;
 
         Ok(CryptoIdentityActor {
             ciphersuite,
             credential_with_key,
+            mls_key_package_bundle,
             username: display_name.to_string(),
             signature_keypair: Arc::new(signature_keypair),
             crypto_provider: provider,
