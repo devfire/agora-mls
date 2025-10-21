@@ -38,7 +38,6 @@ pub enum OpenSSHKeyError {
 //     #[error("Encryption failed: {0}")]
 //     MessageEncryptionFailed(String),
 
-
 // }
 
 #[derive(Error, Debug)]

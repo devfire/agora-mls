@@ -127,6 +127,8 @@ impl Command {
                 .map(CryptoIdentityMessage::InviteUser),
             Command::Groups => Some(CryptoIdentityMessage::ListGroups),
             Command::Group { name } => Some(CryptoIdentityMessage::SetActiveGroup(name.to_owned())),
+            Command::Users => Some(CryptoIdentityMessage::ListUsers),
+            Command::Announce => Some(CryptoIdentityMessage::CreateAnnouncement),
             // Non-crypto commands return None
             _ => None,
         }

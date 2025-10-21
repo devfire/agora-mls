@@ -4,7 +4,6 @@ use clap::Parser;
 use tracing::{Level, error, info};
 use tracing_subscriber;
 
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: ChatArgs = ChatArgs::parse();

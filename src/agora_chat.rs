@@ -3,18 +3,18 @@
 /// This is intended for publishing to a multicast topic where subscribers can
 /// deserialize this wrapper and then process the inner MLS message payload.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct MlsMessageOut {
+pub struct AgoraPacket {
     /// Corresponds to the `version` field in the OpenMLS MlsMessageOut struct.
     #[prost(enumeration = "ProtocolVersion", tag = "1")]
     pub version: i32,
     /// The body of the message, corresponding to the MlsMessageBodyOut enum.
     /// The 'oneof' constraint ensures that a message can only be one of these types at a time,
     /// perfectly mapping the behavior of the Rust enum.
-    #[prost(oneof = "mls_message_out::Body", tags = "2, 3, 4, 5, 7")]
-    pub body: ::core::option::Option<mls_message_out::Body>,
+    #[prost(oneof = "agora_packet::Body", tags = "2, 3, 4, 5, 7")]
+    pub body: ::core::option::Option<agora_packet::Body>,
 }
-/// Nested message and enum types in `MlsMessageOut`.
-pub mod mls_message_out {
+/// Nested message and enum types in `AgoraPacket`.
+pub mod agora_packet {
     /// The body of the message, corresponding to the MlsMessageBodyOut enum.
     /// The 'oneof' constraint ensures that a message can only be one of these types at a time,
     /// perfectly mapping the behavior of the Rust enum.

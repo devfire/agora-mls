@@ -6,7 +6,7 @@ package agora_chat;
 // MlsMessageOut serves as a wrapper for messages produced by an OpenMLS group.
 // This is intended for publishing to a multicast topic where subscribers can
 // deserialize this wrapper and then process the inner MLS message payload.
-message MlsMessageOut {
+message AgoraPacket {
   // Corresponds to the `version` field in the OpenMLS MlsMessageOut struct.
   ProtocolVersion version = 1;
 

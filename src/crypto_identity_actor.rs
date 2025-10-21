@@ -3,7 +3,7 @@ use std::{collections::HashMap, fs, path::Path, sync::Arc};
 use anyhow::{Context, Result, anyhow};
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use kameo::prelude::*;
-use openmls::prelude::*;
+use openmls::prelude::{tls_codec::Deserialize, *};
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::{OpenMlsRustCrypto, RustCrypto};
 use ssh_key::PrivateKey;
@@ -16,14 +16,11 @@ use zeroize::Zeroizing;
 /// public information is returned via messages.
 #[derive(Actor)]
 pub struct CryptoIdentityActor {
-    // === SSH Identity (PRIVATE - never exposed) ===
-    signing_key: SigningKey,
-    verifying_key: VerifyingKey,
-    handle: String,
-
     // === MLS Protocol State (PRIVATE - never exposed) ===
     ciphersuite: Ciphersuite,
-    mls_key_package: KeyPackageBundle,
+
+    username: String,
+
     credential_with_key: CredentialWithKey,
     signature_keypair: Arc<SignatureKeyPair>,
     crypto_provider: Arc<OpenMlsRustCrypto>,
@@ -56,22 +53,33 @@ pub enum CryptoIdentityMessage {
 
     // === MLS Group Operations ===
     /// Create a new MLS group
-    CreateGroup { group_name: String },
+    CreateGroup {
+        group_name: String,
+    },
 
-    /// Add a member to the active group
-    AddMember { key_package: KeyPackage },
+    /// Add a member to the current active group
+    AddMemberToGroup {
+        key_package: KeyPackage,
+    },
 
     /// Encrypt a message for the current active group
     EncryptMessage(Vec<u8>),
 
     /// Process an incoming MLS message
-    ProcessMessage { mls_message_in: MlsMessageIn },
+    ProcessMessage {
+        mls_message_in: MlsMessageIn,
+    },
 
     /// Join a group via Welcome message
-    JoinGroup { welcome: Welcome },
+    JoinGroup {
+        welcome: Welcome,
+    },
 
     /// List all groups
     ListGroups,
+
+    /// List all users in cache
+    ListUsers,
 
     /// Get the active group name
     GetActiveGroup,
@@ -81,6 +89,13 @@ pub enum CryptoIdentityMessage {
 
     /// Handle user invites
     InviteUser(UserIdentity),
+
+    CreateAnnouncement, // --> returns CryptoIdentityReply::UserAnnouncement(UserIdentity)
+
+    /// Add a new user from their announcement
+    AddNewUser {
+        user_announcement: UserAnnouncement,
+    },
 }
 
 #[derive(Reply)]
@@ -108,7 +123,7 @@ pub enum CryptoIdentityReply {
     /// Group created successfully
     GroupCreated(String),
     /// Member added successfully
-    MemberAdded {
+    WelcomePackage {
         commit: MlsMessageOut,
         welcome: MlsMessageOut,      // Welcome wrapped in MlsMessageOut
         group_info: Option<Vec<u8>>, // Serialized GroupInfo
@@ -131,6 +146,11 @@ pub enum CryptoIdentityReply {
     ActiveGroup {
         group_name: Option<String>,
     },
+    /// A user announcement is a custom protocol message containing username and key package, not an MLS protocol message.
+    /// Therefore, it wraps an AgoraPacket, not MlsMessageOut.
+    /// This is used for announcing one's identity to others in response to the /announce command.
+    UserAnnouncement(AgoraPacket),
+
     /// Generic success
     Success,
     /// Operation failed
@@ -166,14 +186,14 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
             CryptoIdentityMessage::CreateGroup { group_name } => {
                 self.handle_create_group(group_name)
             }
-            CryptoIdentityMessage::AddMember { key_package } => {
+            CryptoIdentityMessage::AddMemberToGroup { key_package } => {
                 self.handle_add_member_to_group(key_package)
             }
             CryptoIdentityMessage::EncryptMessage(plaintext) => {
                 self.handle_encrypt_message(plaintext)
             }
             CryptoIdentityMessage::ProcessMessage { mls_message_in } => {
-                self.handle_process_message(mls_message_in)
+                self.handle_mls_message(mls_message_in)
             }
             CryptoIdentityMessage::JoinGroup { welcome } => self.handle_join_group(welcome),
             CryptoIdentityMessage::ListGroups =>
@@ -215,6 +235,11 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
             CryptoIdentityMessage::InviteUser(user_identity) => {
                 self.handle_invite_user(user_identity)
             }
+            CryptoIdentityMessage::CreateAnnouncement => todo!(),
+            CryptoIdentityMessage::AddNewUser { user_announcement } => {
+                self.handle_new_user_announcement(user_announcement)
+            }
+            CryptoIdentityMessage::ListUsers => todo!(),
         }
     }
 }
@@ -317,7 +342,7 @@ impl CryptoIdentityActor {
         use openmls::prelude::tls_codec::Serialize;
         let group_info_bytes = group_info.and_then(|gi| gi.tls_serialize_detached().ok());
 
-        CryptoIdentityReply::MemberAdded {
+        CryptoIdentityReply::WelcomePackage {
             commit: mls_message_out,
             welcome,
             group_info: group_info_bytes,
@@ -357,7 +382,7 @@ impl CryptoIdentityActor {
     }
 
     /// Process an incoming MLS message
-    fn handle_process_message(&mut self, mls_message_in: MlsMessageIn) -> CryptoIdentityReply {
+    fn handle_mls_message(&mut self, mls_message_in: MlsMessageIn) -> CryptoIdentityReply {
         // // Determine which group to use
         // let target_group_name = match group_name.or_else(|| self.active_group.clone()) {
         //     Some(name) => name,
@@ -526,6 +551,40 @@ impl CryptoIdentityActor {
         self.handle_add_member_to_group(validated_keypackage)
     }
 
+    fn create_user_announcement(username: &str, key_package_bytes: Vec<u8>) -> CryptoIdentityReply {
+        let user_announcement = crate::agora_chat::UserAnnouncement {
+            username: username.to_string(),
+            tls_serialized_key_package: key_package_bytes,
+        };
+
+        let proto_message = crate::agora_chat::AgoraPacket {
+            version: crate::agora_chat::ProtocolVersion::Mls10 as i32,
+            body: Some(crate::agora_chat::agora_packet::Body::UserAnnouncement(
+                user_announcement,
+            )),
+        };
+
+        CryptoIdentityReply::UserAnnouncement(proto_message)
+    }
+
+    /// Handle new user announcement
+    fn handle_new_user_announcement(
+        &mut self,
+        user_announcement: UserAnnouncement,
+    ) -> CryptoIdentityReply {
+        // Deserialize the KeyPackage from the announcement
+        let key_package_in =
+            KeyPackageIn::tls_deserialize(&mut &user_announcement.tls_serialized_key_package[..])
+                .expect("boo");
+
+        let user_identity =
+            UserIdentity::from_key_package(&user_announcement.username, &key_package_in)
+                .expect("boo");
+
+        // Store in user cache
+        self.user_cache.insert(user_identity, key_package_in);
+        CryptoIdentityReply::Success
+    }
     /// Extract group name from MlsGroup extensions
     fn extract_group_name(group: &MlsGroup) -> Option<String> {
         const GROUP_NAME_EXTENSION_ID: u16 = 13;
@@ -599,22 +658,19 @@ impl CryptoIdentityActor {
         };
 
         // Step 6: Build MLS key package
-        let mls_key_package = KeyPackage::builder()
-            .build(
-                ciphersuite,
-                provider.as_ref(),
-                &signature_keypair,
-                credential_with_key.clone(),
-            )
-            .context("Failed to create MLS key package")?;
+        // let mls_key_package = KeyPackage::builder()
+        //     .build(
+        //         ciphersuite,
+        //         provider.as_ref(),
+        //         &signature_keypair,
+        //         credential_with_key.clone(),
+        //     )
+        //     .context("Failed to create MLS key package")?;
 
         Ok(CryptoIdentityActor {
-            signing_key,
-            verifying_key,
-            handle: display_name.to_string(),
             ciphersuite,
-            mls_key_package,
             credential_with_key,
+            username: display_name.to_string(),
             signature_keypair: Arc::new(signature_keypair),
             crypto_provider: provider,
             groups: HashMap::new(),
@@ -680,6 +736,8 @@ impl CryptoIdentityActor {
 
 use std::fmt;
 
+use crate::agora_chat::{AgoraPacket, UserAnnouncement};
+
 /// User identity combining username and key fingerprint
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UserIdentity {
@@ -697,20 +755,6 @@ impl UserIdentity {
             fingerprint,
         })
     }
-
-    // /// Create from username and fingerprint string by splitting at '@'
-    // pub fn from_composite_string(identity_str: &str) -> anyhow::Result<Self> {
-    //     let parts: Vec<&str> = identity_str.split('@').collect();
-    //     if parts.len() != 2 {
-    //         return Err(anyhow!(
-    //             "Invalid identity format. Expected 'username@fingerprint'."
-    //         ));
-    //     }
-    //     Ok(Self {
-    //         username: parts[0].to_string(),
-    //         fingerprint: parts[1].to_string(),
-    //     })
-    // }
 }
 
 impl std::str::FromStr for UserIdentity {
