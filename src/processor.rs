@@ -7,7 +7,9 @@ use tracing::{debug, error};
 
 use crate::{
     command::Command,
-    crypto_identity_actor::{CryptoIdentityActor, CryptoIdentityMessage, CryptoIdentityReply},
+    crypto_identity_actor::{
+        CryptoIdentityActor, CryptoIdentityMessage, CryptoIdentityReply, ProcessedMessageResult,
+    },
     network, // state_actor::{StateActor, StateActorMessage, StateActorReply},
 };
 
@@ -215,114 +217,121 @@ impl Processor {
                         Ok(reply) => match reply {
                             CryptoIdentityReply::UpdateComplete => todo!(),
                             CryptoIdentityReply::GroupCreated(group_name) => {
-                                                        display_sender
-                                                            .send(format!("Group {group_name} created"))
-                                                            .await
-                                                            .expect("Unable to send the decrypted msg to display");
-                                                    }
+                                display_sender
+                                    .send(format!("Group {group_name} created"))
+                                    .await
+                                    .expect("Unable to send the decrypted msg to display");
+                            }
                             CryptoIdentityReply::WelcomePackage {
-                                                        commit,
-                                                        welcome,
-                                                        group_info,
-                                                    } => {
-                                                        // The CryptoIdentityReply::MemberAdded returns the tuple (MlsMessageOut, Welcome, Option<GroupInfo>).
-                                                        // The MlsMessageOut contains a Commit message that needs to be fanned out to existing group members.
-                                                        // The Welcome message must be sent to the newly added members, along the optional GroupInfo if it is available.
-                                                        let _gi = group_info; // currently unused
+                                commit,
+                                welcome,
+                                group_info,
+                            } => {
+                                // The CryptoIdentityReply::MemberAdded returns the tuple (MlsMessageOut, Welcome, Option<GroupInfo>).
+                                // The MlsMessageOut contains a Commit message that needs to be fanned out to existing group members.
+                                // The Welcome message must be sent to the newly added members, along the optional GroupInfo if it is available.
+                                let _gi = group_info; // currently unused
 
-                                                        let commit_msg = if let Ok(msg) = commit.try_into() {
-                                                            msg
-                                                        } else {
-                                                            error!("Received invalid MlsMessageIn packet");
-                                                            continue;
-                                                        };
-                                                        if let Err(e) = network_manager.send_message(commit_msg).await {
-                                                            error!("Failed to send message over network: {}", e);
-                                                        }
+                                let commit_msg = if let Ok(msg) = commit.try_into() {
+                                    msg
+                                } else {
+                                    error!("Received invalid MlsMessageIn packet");
+                                    continue;
+                                };
+                                if let Err(e) = network_manager.send_message(commit_msg).await {
+                                    error!("Failed to send message over network: {}", e);
+                                }
 
-                                                        match welcome.try_into() {
-                                                            Ok(welcome_msg) => {
-                                                                if let Err(e) = network_manager.send_message(welcome_msg).await {
-                                                                    error!("Failed to send welcome message: {}", e);
-                                                                }
-                                                            }
-                                                            Err(e) => {
-                                                                error!("Failed to convert welcome message: {}", e);
-                                                            }
-                                                        }
-                                                        // TODO: need to figure out how to send group info properly
-                                                        // if let Some(group_info) = group_info {
-                                                        //     let group_info_msg = group_info.try_into().expect("boo");
-                                                        //     if let Err(e) =
-                                                        //         network_manager.send_message(group_info_msg).await
-                                                        //     {
-                                                        //         error!("Failed to send message over network: {}", e);
-                                                        //     }
-                                                        // }
-                                                    }
+                                match welcome.try_into() {
+                                    Ok(welcome_msg) => {
+                                        if let Err(e) =
+                                            network_manager.send_message(welcome_msg).await
+                                        {
+                                            error!("Failed to send welcome message: {}", e);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to convert welcome message: {}", e);
+                                    }
+                                }
+                                // TODO: need to figure out how to send group info properly
+                                // if let Some(group_info) = group_info {
+                                //     let group_info_msg = group_info.try_into().expect("boo");
+                                //     if let Err(e) =
+                                //         network_manager.send_message(group_info_msg).await
+                                //     {
+                                //         error!("Failed to send message over network: {}", e);
+                                //     }
+                                // }
+                            }
                             CryptoIdentityReply::MlsMessageOut(mls_message_out) => {
-                                                        let msg = mls_message_out.try_into().expect("boo");
+                                let msg = mls_message_out.try_into().expect("boo");
 
-                                                        if let Err(e) = network_manager.send_message(msg).await {
-                                                            error!("Failed to send message over network: {}", e);
-                                                        }
-                                                    }
-                            CryptoIdentityReply::MessageProcessed { result } => {
-                                                        match result {
-                                                            crate::crypto_identity_actor::ProcessedMessageResult::ApplicationMessage(_) => todo!(),
-                                                            crate::crypto_identity_actor::ProcessedMessageResult::ProposalMessage => todo!(),
-                                                            crate::crypto_identity_actor::ProcessedMessageResult::ExternalJoinProposal => todo!(),
-                                                            crate::crypto_identity_actor::ProcessedMessageResult::StagedCommitMerged => todo!(),
-                                                        }
-
-                                                    }
+                                if let Err(e) = network_manager.send_message(msg).await {
+                                    error!("Failed to send message over network: {}", e);
+                                }
+                            }
+                            CryptoIdentityReply::MessageProcessed { result } => match result {
+                                ProcessedMessageResult::ApplicationMessage(_) => todo!(),
+                                ProcessedMessageResult::ProposalMessage => todo!(),
+                                ProcessedMessageResult::ExternalJoinProposal => todo!(),
+                                ProcessedMessageResult::StagedCommitMerged => todo!(),
+                            },
                             CryptoIdentityReply::GroupJoined { group_name } => {
-                                                        display_sender
-                                                            .send(format!("Group {group_name} joined successfully"))
-                                                            .await
-                                                            .expect("Unable to send the decrypted msg to display");
-                                                    }
+                                display_sender
+                                    .send(format!("Group {group_name} joined successfully"))
+                                    .await
+                                    .expect("Unable to send the decrypted msg to display");
+                            }
                             CryptoIdentityReply::Groups { groups } => {
-                                                        let group_list = groups.join(", ");
-                                                        display_sender
-                                                            .send(format!("Known groups: {group_list}"))
-                                                            .await
-                                                            .expect("Unable to send the decrypted msg to display");
-                                                    }
+                                let group_list = groups.join(", ");
+                                display_sender
+                                    .send(format!("Known groups: {group_list}"))
+                                    .await
+                                    .expect("Unable to send the decrypted msg to display");
+                            }
                             CryptoIdentityReply::ActiveGroup { group_name } => {
-                                                        let active_group_name = group_name.unwrap_or("No active group".to_string());
+                                let active_group_name =
+                                    group_name.unwrap_or("No active group".to_string());
 
-                                                        display_sender
-                                                            .send(format!("Current active group: {active_group_name} "))
-                                                            .await
-                                                            .expect("Unable to send the decrypted msg to display");
-                                                    },
+                                display_sender
+                                    .send(format!("Current active group: {active_group_name} "))
+                                    .await
+                                    .expect("Unable to send the decrypted msg to display");
+                            }
                             CryptoIdentityReply::Success => {
                                 display_sender
-                                                            .send("Command executed successfully.".to_string())
-                                                            .await
-                                                            .expect("Unable to send the decrypted msg to display");
-                            },
+                                    .send("Command executed successfully.".to_string())
+                                    .await
+                                    .expect("Unable to send the decrypted msg to display");
+                            }
                             CryptoIdentityReply::Failure(error) => {
-                                display_sender
-                                                            .send(format!("Command failed {error} "))
-                                                            .await
-                                                            .expect("Unable to send the decrypted msg to display");
-                            },
+                                if let Err(e) = display_sender
+                                    .send(format!("Command failed: {error}"))
+                                    .await
+                                {
+                                    error!("Unable to send error message: {e}");
+                                }
+                            }
                             CryptoIdentityReply::UserAnnouncement(announcement) => {
-
-                                 if let Err(e) = network_manager
-                                        .send_message(crate::protobuf_wrapper::ProtoMlsMessageOut(
-                                            announcement,
-                                        ))
-                                        .await
-                                    {
-                                        error!(
-                                            "Failed to send user announcement over network: {}",
-                                            e
-                                        );
-                                    }
-                                },
+                                if let Err(e) = network_manager
+                                    .send_message(crate::protobuf_wrapper::ProtoMlsMessageOut(
+                                        announcement,
+                                    ))
+                                    .await
+                                {
+                                    error!("Failed to send user announcement over network: {}", e);
+                                }
+                            }
+                            CryptoIdentityReply::Users { users } => {
+                                let user_list = users.join(", ");
+                                if let Err(e) = display_sender
+                                    .send(format!("Known users: {user_list}"))
+                                    .await
+                                {
+                                    error!("Unable to send the list of users to display: {e}");
+                                }
+                            }
                         },
                         Err(e) => {
                             error!("Failed to send command to state actor: {}", e);
@@ -358,12 +367,6 @@ impl Processor {
                                 user_announcement.username
                             );
 
-                            // // Deserialize the KeyPackage from the announcement
-                            // let key_package_in = KeyPackageIn::tls_deserialize(
-                            //     &mut &user_announcement.tls_serialized_key_package[..],
-                            // )
-                            // .expect("boo");
-
                             // send it to the crypto actor as a UserAnnouncement
                             match crypto_actor
                                 .ask(CryptoIdentityMessage::AddNewUser {
@@ -393,43 +396,74 @@ impl Processor {
                                         .expect("Unable to send the error msg to display");
                                 }
                             }
-                        }
-                        // User announcements are handled above, other messages go to the crypto actor as MlsMessageIn
-                        let mls_message_in = if let Ok(msg) = packet.try_into() {
-                            msg
                         } else {
-                            error!("Received invalid MlsMessageIn packet");
-                            continue;
-                        };
+                            // User announcements are handled above, other messages go to the crypto actor as MlsMessageIn
+                            let mls_message_in = if let Ok(msg) = packet.try_into() {
+                                msg
+                            } else {
+                                error!("Received invalid MlsMessageIn packet");
+                                continue;
+                            };
 
-                        match crypto_actor
-                            .ask(CryptoIdentityMessage::ProcessMessage { mls_message_in })
-                            .await
-                        {
-                            Ok(reply) => match reply {
-                                CryptoIdentityReply::MessageProcessed { result } => {
-                                    // let's see what we got
-                                    match result {
-                                        crate::crypto_identity_actor::ProcessedMessageResult::ApplicationMessage(m) => {
-                                            display_sender
-                                                .send(format!(
-                                                    "{m}"
-                                                ))
-                                                .await
-                                                .expect("Unable to send the decrypted msg to display");
+                            match crypto_actor
+                                .ask(CryptoIdentityMessage::ProcessMessage { mls_message_in })
+                                .await
+                            {
+                                Ok(reply) => match reply {
+                                    CryptoIdentityReply::MessageProcessed { result } => {
+                                        // let's see what we got
+                                        match result {
+                                            ProcessedMessageResult::ApplicationMessage(m) => {
+                                                display_sender.send(format!("{m}")).await.expect(
+                                                    "Unable to send the decrypted msg to display",
+                                                );
+                                            }
+                                            ProcessedMessageResult::ProposalMessage => {
+                                                if let Err(e) = display_sender
+                                                    .send(format!(
+                                                        "Received ProposalMessage but don't know what to do with it."
+                                                    ))
+                                                    .await
+                                                {
+                                                    error!(
+                                                        "Unable to send the list of users to display: {e}"
+                                                    );
+                                                }
+                                            }
+                                            ProcessedMessageResult::ExternalJoinProposal => {
+                                                 if let Err(e) = display_sender
+                                                    .send(format!(
+                                                        "Received ExternalJoinProposal but don't know what to do with it."
+                                                    ))
+                                                    .await
+                                                {
+                                                    error!(
+                                                        "Unable to send the list of users to display: {e}"
+                                                    );
+                                                }
+                                            },
+                                            ProcessedMessageResult::StagedCommitMerged => {
+                                                if let Err(e) = display_sender
+                                                    .send(format!(
+                                                        "Staged commit merged successfully."
+                                                    ))
+                                                    .await
+                                                {
+                                                    error!(
+                                                        "Unable to send the list of users to display: {e}"
+                                                    );
+                                                }
+                                            }
                                         }
-                                        crate::crypto_identity_actor::ProcessedMessageResult::ProposalMessage => todo!(),
-                                        crate::crypto_identity_actor::ProcessedMessageResult::ExternalJoinProposal => todo!(),
-                                        crate::crypto_identity_actor::ProcessedMessageResult::StagedCommitMerged => todo!(),
                                     }
+                                    _ => unreachable!(),
+                                },
+                                Err(e) => {
+                                    display_sender
+                                        .send(e.to_string())
+                                        .await
+                                        .expect("Unable to send the error msg to display");
                                 }
-                                _ => unreachable!(),
-                            },
-                            Err(e) => {
-                                display_sender
-                                    .send(e.to_string())
-                                    .await
-                                    .expect("Unable to send the error msg to display");
                             }
                         }
                     }

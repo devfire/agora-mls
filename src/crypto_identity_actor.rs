@@ -146,6 +146,12 @@ pub enum CryptoIdentityReply {
     Groups {
         groups: Vec<String>,
     },
+
+    /// List of known users
+    Users {
+        users: Vec<String>,
+    },
+
     /// Active group name
     ActiveGroup {
         group_name: Option<String>,
@@ -243,7 +249,14 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
             CryptoIdentityMessage::AddNewUser { user_announcement } => {
                 self.handle_new_user_announcement(user_announcement)
             }
-            CryptoIdentityMessage::ListUsers => todo!(),
+            CryptoIdentityMessage::ListUsers => {
+                let users: Vec<String> = self
+                    .user_cache
+                    .keys()
+                    .map(|user_identity| user_identity.to_string())
+                    .collect();
+                CryptoIdentityReply::Users { users }
+            }
         }
     }
 }
