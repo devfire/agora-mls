@@ -407,21 +407,23 @@ impl Processor {
                             .await
                         {
                             Ok(reply) => match reply {
-                                CryptoIdentityReply::UpdateComplete => todo!(),
-                                CryptoIdentityReply::GroupCreated(_) => todo!(),
-                                CryptoIdentityReply::WelcomePackage {
-                                    commit,
-                                    welcome,
-                                    group_info,
-                                } => todo!(),
-                                CryptoIdentityReply::MlsMessageOut(mls_message_out) => todo!(),
-                                CryptoIdentityReply::MessageProcessed { result } => todo!(),
-                                CryptoIdentityReply::GroupJoined { group_name } => todo!(),
-                                CryptoIdentityReply::Groups { groups } => todo!(),
-                                CryptoIdentityReply::ActiveGroup { group_name } => todo!(),
-                                CryptoIdentityReply::Success => todo!(),
-                                CryptoIdentityReply::Failure(error) => todo!(),
-                                CryptoIdentityReply::UserAnnouncement(announcement) => {}
+                                CryptoIdentityReply::MessageProcessed { result } => {
+                                    // let's see what we got
+                                    match result {
+                                        crate::crypto_identity_actor::ProcessedMessageResult::ApplicationMessage(m) => {
+                                            display_sender
+                                                .send(format!(
+                                                    "{m}"
+                                                ))
+                                                .await
+                                                .expect("Unable to send the decrypted msg to display");
+                                        }
+                                        crate::crypto_identity_actor::ProcessedMessageResult::ProposalMessage => todo!(),
+                                        crate::crypto_identity_actor::ProcessedMessageResult::ExternalJoinProposal => todo!(),
+                                        crate::crypto_identity_actor::ProcessedMessageResult::StagedCommitMerged => todo!(),
+                                    }
+                                }
+                                _ => unreachable!(),
                             },
                             Err(e) => {
                                 display_sender
