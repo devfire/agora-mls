@@ -198,7 +198,10 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
     ) -> Self::Reply {
         match msg {
             CryptoIdentityMessage::CreateGroup { group_name } => {
-                self.handle_create_group(group_name)
+                match self.handle_create_group(group_name) {
+                    Ok(reply) => reply,
+                    Err(e) => CryptoIdentityReply::Failure(e),
+                }
             }
             CryptoIdentityMessage::AddMemberToGroup { key_package } => {
                 self.handle_add_member_to_group(key_package)
@@ -209,7 +212,10 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
             CryptoIdentityMessage::ProcessMessage { mls_message_in } => {
                 self.handle_mls_message(mls_message_in)
             }
-            CryptoIdentityMessage::JoinGroup { welcome } => self.handle_join_group(welcome),
+            CryptoIdentityMessage::JoinGroup { welcome } => match self.handle_join_group(welcome) {
+                Ok(reply) => reply,
+                Err(e) => CryptoIdentityReply::Failure(e),
+            },
             CryptoIdentityMessage::ListGroups =>
             // 1. Get list of group IDs
             // 2. Fetch the corresponding MlsGroup references from the HashMap
@@ -232,26 +238,23 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                 }),
             },
             CryptoIdentityMessage::SetActiveGroup(group_name) => {
-                // first we need to convert group name to group_id
-                let group_id = match self.group_name_to_id.get(&group_name) {
-                    Some(gid) => gid,
-                    None => {
-                        return CryptoIdentityReply::Failure(anyhow!("Unknown group {group_name}"));
-                    }
-                };
-                if self.groups.contains_key(group_id) {
-                    self.active_group = Some(group_id.clone());
-                    CryptoIdentityReply::Success
-                } else {
-                    CryptoIdentityReply::Failure(anyhow!("Group ID not found"))
+                match self.set_active_group(&group_name) {
+                    Ok(reply) => reply,
+                    Err(e) => CryptoIdentityReply::Failure(e),
                 }
             }
             CryptoIdentityMessage::InviteUser(user_identity) => {
                 self.handle_invite_user(user_identity)
             }
-            CryptoIdentityMessage::CreateAnnouncement => self.create_user_announcement(),
+            CryptoIdentityMessage::CreateAnnouncement => match self.create_user_announcement() {
+                Ok(reply) => reply,
+                Err(e) => CryptoIdentityReply::Failure(e),
+            },
             CryptoIdentityMessage::AddNewUser { user_announcement } => {
-                self.handle_new_user_announcement(user_announcement)
+                match self.handle_new_user_announcement(user_announcement) {
+                    Ok(reply) => reply,
+                    Err(e) => CryptoIdentityReply::Failure(e),
+                }
             }
             CryptoIdentityMessage::ListUsers => {
                 let users: Vec<String> = self
@@ -263,7 +266,10 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
             }
             CryptoIdentityMessage::ProcessEncryptedGroupInfo {
                 encrypted_group_info,
-            } => self.handle_encrypted_group_info(encrypted_group_info),
+            } => match self.handle_encrypted_group_info(encrypted_group_info) {
+                Ok(reply) => reply,
+                Err(e) => CryptoIdentityReply::Failure(e),
+            },
         }
     }
 }
@@ -277,8 +283,24 @@ impl CryptoIdentityActor {
     // MLS GROUP OPERATION HANDLERS
     // ========================================================================
 
+    fn set_active_group(&mut self, group_name: &str) -> Result<CryptoIdentityReply> {
+        // first we need to convert group name to group_id
+        let group_id = match self.group_name_to_id.get(group_name) {
+            Some(gid) => gid,
+            None => {
+                return Err(anyhow!("Unknown group {group_name}"));
+            }
+        };
+        if self.groups.contains_key(group_id) {
+            self.active_group = Some(group_id.clone());
+            Ok(CryptoIdentityReply::Success)
+        } else {
+            Err(anyhow!("Group ID not found"))
+        }
+    }
+
     /// Create a new MLS group with the specified name
-    fn handle_create_group(&mut self, group_name: String) -> CryptoIdentityReply {
+    fn handle_create_group(&mut self, group_name: String) -> Result<CryptoIdentityReply> {
         const GROUP_NAME_EXTENSION_ID: u16 = 13;
 
         // Create group name extension
@@ -297,7 +319,7 @@ impl CryptoIdentityActor {
         {
             Ok(builder) => builder.use_ratchet_tree_extension(true).build(),
             Err(e) => {
-                return CryptoIdentityReply::Failure(anyhow!("Invalid extension: {e}",));
+                return Err(anyhow!("Invalid extension: {e}",));
             }
         };
 
@@ -310,7 +332,7 @@ impl CryptoIdentityActor {
         ) {
             Ok(g) => g,
             Err(e) => {
-                return CryptoIdentityReply::Failure(anyhow!("Group creation failed: {e}"));
+                return Err(anyhow!("Group creation failed: {e}"));
             }
         };
 
@@ -325,7 +347,7 @@ impl CryptoIdentityActor {
         self.group_name_to_id
             .insert(group_name.clone(), group_id.clone());
 
-        CryptoIdentityReply::GroupCreated(group_name)
+        Ok(CryptoIdentityReply::GroupCreated(group_name))
     }
 
     /// Export GroupInfo for external commit join, encrypted with recipient's KeyPackage
@@ -599,7 +621,7 @@ impl CryptoIdentityActor {
     }
 
     /// Join a group via Welcome message
-    fn handle_join_group(&mut self, welcome: Welcome) -> CryptoIdentityReply {
+    fn handle_join_group(&mut self, welcome: Welcome) -> Result<CryptoIdentityReply> {
         // Create join configuration
         let mls_group_join_config = MlsGroupJoinConfig::default();
 
@@ -612,10 +634,10 @@ impl CryptoIdentityActor {
         ) {
             Ok(sw) => sw,
             Err(e) => {
-                return CryptoIdentityReply::Failure(anyhow!(
+                return Ok(CryptoIdentityReply::Failure(anyhow!(
                     "Failed to stage Welcome message: {}",
                     e
-                ));
+                )));
             }
         };
 
@@ -623,14 +645,21 @@ impl CryptoIdentityActor {
         let group = match staged_welcome.into_group(self.crypto_provider.as_ref()) {
             Ok(g) => g,
             Err(e) => {
-                return CryptoIdentityReply::Failure(anyhow!("Failed to join group: {}", e));
+                return Ok(CryptoIdentityReply::Failure(anyhow!(
+                    "Failed to join group: {}",
+                    e
+                )));
             }
         };
 
         // Extract group name from extensions, we only need it for the return confirmation
         let group_name = match Self::extract_group_name(&group) {
             Some(name) => name,
-            None => return CryptoIdentityReply::Failure(anyhow!("Failed to extract group name.")),
+            None => {
+                return Ok(CryptoIdentityReply::Failure(anyhow!(
+                    "Failed to extract group name."
+                )));
+            }
         };
 
         let group_id = group.group_id().clone();
@@ -639,7 +668,7 @@ impl CryptoIdentityActor {
         self.groups.insert(group_id.clone(), group);
         self.active_group = Some(group_id.clone());
 
-        CryptoIdentityReply::GroupJoined { group_name }
+        Ok(CryptoIdentityReply::GroupJoined { group_name })
     }
 
     /// Handle the new user invite request
@@ -684,7 +713,7 @@ impl CryptoIdentityActor {
     fn handle_encrypted_group_info(
         &mut self,
         encrypted_group_info: crate::agora_chat::EncryptedGroupInfo,
-    ) -> CryptoIdentityReply {
+    ) -> Result<CryptoIdentityReply> {
         // 1. DECRYPT THE PAYLOAD
         // ======================
 
@@ -699,7 +728,7 @@ impl CryptoIdentityActor {
         let hpke_ciphertext_bytes = &encrypted_group_info.hpke_ciphertext;
 
         if hpke_ciphertext_bytes.len() < kem_output_len {
-            return CryptoIdentityReply::Failure(anyhow!("Invalid HPKE ciphertext length"));
+            return Err(anyhow!("Invalid HPKE ciphertext length"));
         }
         let (kem_output, ciphertext) = hpke_ciphertext_bytes.split_at(kem_output_len);
 
@@ -722,9 +751,7 @@ impl CryptoIdentityActor {
         ) {
             Ok(bytes) => bytes,
             Err(e) => {
-                return CryptoIdentityReply::Failure(anyhow!(
-                    "Failed to HPKE decrypt GroupInfo: {e}"
-                ));
+                return Err(anyhow!("Failed to HPKE decrypt GroupInfo: {e}"));
             }
         };
 
@@ -733,7 +760,7 @@ impl CryptoIdentityActor {
         // ============================
         let verifiable_group_info =
             group_info::VerifiableGroupInfo::tls_deserialize(&mut &group_info_bytes[..])
-                .expect("boo");
+                .context("Failed to deserialize GroupInfo")?;
 
         // 3. CREATE A NEW GROUP AND THE EXTERNAL COMMIT
         // ===========================================
@@ -745,18 +772,18 @@ impl CryptoIdentityActor {
                 verifiable_group_info,
                 self.credential_with_key.clone(),
             )
-            .expect("error building group")
+            .context("error building group")?
             .load_psks(self.crypto_provider.as_ref().storage())
-            .expect("error loading psks")
+            .context("error loading psks")?
             .build(
                 self.crypto_provider.rand(),
                 self.crypto_provider.crypto(),
                 self.signature_keypair.as_ref(),
                 |_| true,
             )
-            .expect("error building external commit")
+            .context("error building external commit")?
             .finalize(self.crypto_provider.as_ref())
-            .expect("error finalizing external commit");
+            .context("error finalizing external commit")?;
 
         // Store the group
         let group_id = new_group_to_join.group_id().clone();
@@ -764,16 +791,16 @@ impl CryptoIdentityActor {
 
         // Return the commit message to broadcast
         let (commit_message, _welcome, _group_info) = commit_message_bundle.into_contents();
-        CryptoIdentityReply::MlsMessageOut(commit_message)
+        Ok(CryptoIdentityReply::MlsMessageOut(commit_message))
     }
 
-    fn create_user_announcement(&mut self) -> CryptoIdentityReply {
+    fn create_user_announcement(&mut self) -> Result<CryptoIdentityReply> {
         // Serialize the KeyPackage to bytes
         let key_package_bytes = self
             .mls_key_package_bundle
             .key_package()
             .tls_serialize_detached()
-            .expect("boo");
+            .context("Failed to serialize key package")?;
         let user_announcement = crate::agora_chat::UserAnnouncement {
             username: self.username.clone(),
             tls_serialized_key_package: key_package_bytes,
@@ -786,26 +813,26 @@ impl CryptoIdentityActor {
             )),
         };
 
-        CryptoIdentityReply::UserAnnouncement(proto_message)
+        Ok(CryptoIdentityReply::UserAnnouncement(proto_message))
     }
 
     /// Handle new user announcement
     fn handle_new_user_announcement(
         &mut self,
         user_announcement: UserAnnouncement,
-    ) -> CryptoIdentityReply {
+    ) -> Result<CryptoIdentityReply> {
         // Deserialize the KeyPackage from the announcement
         let key_package_in =
             KeyPackageIn::tls_deserialize(&mut &user_announcement.tls_serialized_key_package[..])
-                .expect("boo");
+                .context("Failed to deserialize KeyPackage from announcement")?;
 
         let user_identity =
             UserIdentity::from_key_package(&user_announcement.username, &key_package_in)
-                .expect("boo");
+                .context("Failed to create UserIdentity from KeyPackage")?;
 
         // Store in user cache
         self.user_cache.insert(user_identity, key_package_in);
-        CryptoIdentityReply::Success
+        Ok(CryptoIdentityReply::Success)
     }
     /// Extract group name from MlsGroup extensions
     fn extract_group_name(group: &MlsGroup) -> Option<String> {
