@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
 use anyhow::{Context, Result, anyhow};
-use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
+use ed25519_dalek::{SigningKey, VerifyingKey};
 use kameo::prelude::*;
 use openmls::prelude::{
     tls_codec::{Deserialize, Serialize},
@@ -100,6 +100,11 @@ pub enum CryptoIdentityMessage {
     AddNewUser {
         user_announcement: UserAnnouncement,
     },
+
+    /// Process received HPKE-encrypted GroupInfo and create external commit
+    ProcessEncryptedGroupInfo {
+        encrypted_group_info: crate::agora_chat::EncryptedGroupInfo,
+    },
 }
 
 #[derive(Reply)]
@@ -126,11 +131,15 @@ pub enum CryptoIdentityReply {
     // === MLS Operation Replies (NEW - Phase 2) ===
     /// Group created successfully
     GroupCreated(String),
-    /// Member added successfully
+    /// Member added successfully (DEPRECATED - use GroupInfoExported for external commits)
     WelcomePackage {
         commit: MlsMessageOut,
         welcome: MlsMessageOut,      // Welcome wrapped in MlsMessageOut
         group_info: Option<Vec<u8>>, // Serialized GroupInfo
+    },
+    /// HPKE-encrypted GroupInfo for external commit join
+    EncryptedGroupInfoExported {
+        encrypted_group_info: AgoraPacket, // EncryptedGroupInfo wrapped in AgoraPacket
     },
     /// Message encrypted successfully
     MlsMessageOut(MlsMessageOut),
@@ -257,6 +266,9 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                     .collect();
                 CryptoIdentityReply::Users { users }
             }
+            CryptoIdentityMessage::ProcessEncryptedGroupInfo {
+                encrypted_group_info,
+            } => self.handle_encrypted_group_info(encrypted_group_info),
         }
     }
 }
@@ -321,7 +333,26 @@ impl CryptoIdentityActor {
         CryptoIdentityReply::GroupCreated(group_name)
     }
 
-    /// Add a member to the active MLS group
+    /// Export GroupInfo for external commit join, encrypted with recipient's KeyPackage
+    ///
+    /// This function exports the group's public state (GroupInfo) and encrypts it using
+    /// HPKE with the recipient's public key from their KeyPackage. This provides transport-level
+    /// encryption of the GroupInfo before transmission.
+    ///
+    /// Security model:
+    /// 1. GroupInfo is encrypted using HPKE with recipient's HpkePublicKey
+    /// 2. Only the recipient with the corresponding private key can decrypt
+    /// 3. The encrypted ciphertext is sent over the network
+    /// 4. Recipient decrypts and uses GroupInfo to create external commit
+    /// 5. Current members process and accept the external commit proposal
+    ///
+    /// Flow:
+    /// 1. Export GroupInfo from current group state
+    /// 2. Extract recipient's HPKE public key from their KeyPackage
+    /// 3. Encrypt GroupInfo bytes using HPKE seal operation
+    /// 4. Send encrypted ciphertext to recipient
+    /// 5. Recipient decrypts with their HPKE private key
+    /// 6. Recipient uses GroupInfo to create external commit
     fn handle_add_member_to_group(&mut self, key_package: KeyPackage) -> CryptoIdentityReply {
         // Determine which group to use
         let active_group_id = match &self.active_group {
@@ -330,39 +361,103 @@ impl CryptoIdentityActor {
                 return CryptoIdentityReply::Failure(anyhow!("No active group found"));
             }
         };
+
         // Get the group
-        let active_group_ref = match self.groups.get_mut(&active_group_id) {
+        let active_group_ref = match self.groups.get(&active_group_id) {
             Some(g) => g,
             None => {
                 return CryptoIdentityReply::Failure(anyhow!("No active group found"));
             }
         };
 
-        // Add member (signature_keypair used HERE - stays private)
-        let (mls_message_out, welcome, group_info) = match active_group_ref.add_members(
-            self.crypto_provider.as_ref(),
+        // Export the GroupInfo for the external joiner
+        let group_info_out = match active_group_ref.export_group_info(
+            &RustCrypto::default(),
             &*self.signature_keypair,
-            &[key_package],
+            true, // with_ratchet_tree - include the ratchet tree for external commits
         ) {
-            Ok(result) => result,
+            Ok(gi) => gi,
             Err(e) => {
-                return CryptoIdentityReply::Failure(anyhow!("Failed to add member: {e}"));
+                return CryptoIdentityReply::Failure(anyhow!("Failed to export GroupInfo: {e}"));
             }
         };
 
-        // Merge the pending commit
-        if let Err(e) = active_group_ref.merge_pending_commit(self.crypto_provider.as_ref()) {
-            return CryptoIdentityReply::Failure(anyhow!("Failed to merge pending commit: {e}"));
-        }
+        // Serialize GroupInfo to bytes for encryption
+        let group_info_bytes = match group_info_out.tls_serialize_detached() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return CryptoIdentityReply::Failure(anyhow!("Failed to serialize GroupInfo: {e}"));
+            }
+        };
 
-        // Serialize group_info if present
-        use openmls::prelude::tls_codec::Serialize;
-        let group_info_bytes = group_info.and_then(|gi| gi.tls_serialize_detached().ok());
+        // Extract the HPKE public key from the recipient's KeyPackage
+        let recipient_hpke_key = key_package.hpke_init_key();
 
-        CryptoIdentityReply::WelcomePackage {
-            commit: mls_message_out,
-            welcome,
-            group_info: group_info_bytes,
+        // Get the ciphersuite from the group for HPKE configuration
+        let ciphersuite = active_group_ref.ciphersuite();
+
+        // Encrypt the GroupInfo using HPKE with the recipient's public key
+        // info: context string for HPKE
+        // aad: additional authenticated data (group ID)
+        let info = b"GroupInfo HPKE Encryption for External Commit";
+        let aad = active_group_ref.group_id().as_slice();
+
+        // Use openmls_rust_crypto's HPKE implementation via OpenMlsCryptoProvider trait
+        let crypto = RustCrypto::default();
+
+        // Convert HpkePublicKey to bytes for the seal operation
+        let recipient_pk_bytes = recipient_hpke_key.as_slice();
+
+        let hpke_ciphertext = match crypto.hpke_seal(
+            ciphersuite.hpke_config(),
+            recipient_pk_bytes,
+            info,
+            aad,
+            &group_info_bytes,
+        ) {
+            Ok(ct) => ct,
+            Err(e) => {
+                return CryptoIdentityReply::Failure(anyhow!(
+                    "Failed to HPKE encrypt GroupInfo: {e}"
+                ));
+            }
+        };
+
+        // Package the HPKE ciphertext for transmission using the new EncryptedGroupInfo type
+        // Format: [KEM output][ciphertext] concatenated
+        let mut hpke_ciphertext_bytes = Vec::new();
+        hpke_ciphertext_bytes.extend_from_slice(hpke_ciphertext.kem_output.as_slice());
+        hpke_ciphertext_bytes.extend_from_slice(hpke_ciphertext.ciphertext.as_slice());
+
+        let kem_output_len = hpke_ciphertext.kem_output.as_slice().len() as u32;
+
+        // Create the EncryptedGroupInfo protobuf message
+        use crate::agora_chat;
+        let encrypted_group_info_proto = agora_chat::EncryptedGroupInfo {
+            group_id: active_group_ref.group_id().as_slice().to_vec(),
+            hpke_ciphertext: hpke_ciphertext_bytes.clone(),
+            kem_output_length: kem_output_len,
+        };
+
+        // Wrap in AgoraPacket
+        let agora_packet = agora_chat::AgoraPacket {
+            version: agora_chat::ProtocolVersion::Mls10 as i32,
+            body: Some(agora_chat::agora_packet::Body::EncryptedGroupInfo(
+                encrypted_group_info_proto,
+            )),
+        };
+
+        tracing::info!(
+            "Exported and HPKE-encrypted GroupInfo ({} bytes: {} bytes KEM output + {} bytes ciphertext) for external commit join to group: {:?}",
+            hpke_ciphertext_bytes.len(),
+            kem_output_len,
+            hpke_ciphertext.ciphertext.as_slice().len(),
+            active_group_ref.group_id()
+        );
+
+        // Return the encrypted GroupInfo wrapped in AgoraPacket for transmission
+        CryptoIdentityReply::EncryptedGroupInfoExported {
+            encrypted_group_info: agora_packet,
         }
     }
 
@@ -475,7 +570,21 @@ impl CryptoIdentityActor {
                 }
             }
             ProcessedMessageContent::ProposalMessage(_) => ProcessedMessageResult::ProposalMessage,
-            ProcessedMessageContent::ExternalJoinProposalMessage(_) => {
+            ProcessedMessageContent::ExternalJoinProposalMessage(external_join_proposal) => {
+                // The proposal has been automatically added to the group's proposal queue
+                // by OpenMLS during process_message(). An existing group member needs to
+                // commit this proposal to complete the external join.
+
+                // Log the external join attempt for visibility
+                tracing::info!(
+                    "External join proposal received in group: {:?}. Proposal queued for commit.",
+                    group.group_id()
+                );
+
+                // Store proposal reference if needed for tracking
+                // Note: OpenMLS handles the proposal queue internally
+                let _proposal_ref = external_join_proposal.proposal();
+
                 ProcessedMessageResult::ExternalJoinProposal
             }
             ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
@@ -566,6 +675,100 @@ impl CryptoIdentityActor {
 
         // Add the member to the active group
         self.handle_add_member_to_group(validated_keypackage)
+    }
+
+    /// Process a received HPKE-encrypted GroupInfo to initiate an external join.
+    ///
+    /// This function is called by a new user who has received an invitation. It performs
+    /// the following steps:
+    /// 1. Decrypts the GroupInfo using the actor's own HPKE private key.
+    /// 2. Deserializes the plaintext GroupInfo.
+    /// 3. Creates a new MlsGroup instance from the GroupInfo.
+    /// 4. Creates an external commit message.
+    /// 5. Returns the commit message, which must then be broadcast to the group.
+    fn handle_encrypted_group_info(
+        &mut self,
+        encrypted_group_info: crate::agora_chat::EncryptedGroupInfo,
+    ) -> CryptoIdentityReply {
+        // 1. DECRYPT THE PAYLOAD
+        // ======================
+
+        // AAD must match what the sender used. We get it from the plaintext part of the message.
+        let aad = &encrypted_group_info.group_id;
+
+        // The info string must also match the sender's.
+        let info = b"GroupInfo HPKE Encryption for External Commit";
+
+        // Split the received ciphertext into its two parts using the provided length.
+        let kem_output_len = encrypted_group_info.kem_output_length as usize;
+        let hpke_ciphertext_bytes = &encrypted_group_info.hpke_ciphertext;
+
+        if hpke_ciphertext_bytes.len() < kem_output_len {
+            return CryptoIdentityReply::Failure(anyhow!("Invalid HPKE ciphertext length"));
+        }
+        let (kem_output, ciphertext) = hpke_ciphertext_bytes.split_at(kem_output_len);
+
+        // Reconstruct the HpkeCiphertext struct for the crypto library.
+        let hpke_ciphertext = HpkeCiphertext {
+            kem_output: kem_output.to_vec().into(),
+            ciphertext: ciphertext.to_vec().into(),
+        };
+
+        // Use openmls_rust_crypto's HPKE implementation via OpenMlsCryptoProvider trait
+        let crypto = RustCrypto::default();
+
+        // Decrypt using our OWN HPKE private key from our KeyPackageBundle.
+        let group_info_bytes = match crypto.hpke_open(
+            self.ciphersuite.hpke_config(),
+            &hpke_ciphertext,
+            self.mls_key_package_bundle.init_private_key(),
+            info,
+            aad,
+        ) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return CryptoIdentityReply::Failure(anyhow!(
+                    "Failed to HPKE decrypt GroupInfo: {e}"
+                ));
+            }
+        };
+
+        // ============================
+        // 2. DESERIALIZE THE GroupInfo
+        // ============================
+        let verifiable_group_info =
+            group_info::VerifiableGroupInfo::tls_deserialize(&mut &group_info_bytes[..])
+                .expect("boo");
+
+        // 3. CREATE A NEW GROUP AND THE EXTERNAL COMMIT
+        // ===========================================
+
+        let (mut new_group_to_join, commit_message_bundle) = MlsGroup::external_commit_builder()
+            .with_aad(aad.to_vec())
+            .build_group(
+                self.crypto_provider.as_ref(),
+                verifiable_group_info,
+                self.credential_with_key.clone(),
+            )
+            .expect("error building group")
+            .load_psks(self.crypto_provider.as_ref().storage())
+            .expect("error loading psks")
+            .build(
+                self.crypto_provider.rand(),
+                self.crypto_provider.crypto(),
+                self.signature_keypair.as_ref(),
+                |_| true,
+            )
+            .expect("error building external commit")
+            .finalize(self.crypto_provider.as_ref())
+            .expect("error finalizing external commit");
+
+        // Store the group
+        let group_id = new_group_to_join.group_id().clone();
+        self.groups.insert(group_id, new_group_to_join);
+
+        // Return the commit message to broadcast
+        CryptoIdentityReply::MlsMessageOut(commit_message_bundle)
     }
 
     fn create_user_announcement(&mut self) -> CryptoIdentityReply {

@@ -1,11 +1,11 @@
 use kameo::prelude::ActorRef;
 
-use openmls::prelude::{KeyPackageIn, tls_codec::Deserialize};
 use rustyline::{DefaultEditor, error::ReadlineError};
 use std::sync::Arc;
 use tracing::{debug, error};
 
 use crate::{
+    agora_chat,
     command::Command,
     crypto_identity_actor::{
         CryptoIdentityActor, CryptoIdentityMessage, CryptoIdentityReply, ProcessedMessageResult,
@@ -264,6 +264,23 @@ impl Processor {
                                 //     }
                                 // }
                             }
+                            CryptoIdentityReply::EncryptedGroupInfoExported { encrypted_group_info } => {
+                                // HPKE-encrypted GroupInfo for external commit join
+                                // Send to network for the external joiner
+                                if let Err(e) = network_manager
+                                    .send_message(crate::protobuf_wrapper::ProtoMlsMessageOut(
+                                        encrypted_group_info,
+                                    ))
+                                    .await
+                                {
+                                    error!("Failed to send encrypted GroupInfo over network: {}", e);
+                                } else {
+                                    display_sender
+                                        .send("HPKE-encrypted GroupInfo sent for external commit join".to_string())
+                                        .await
+                                        .expect("Unable to send status message to display");
+                                }
+                            }
                             CryptoIdentityReply::MlsMessageOut(mls_message_out) => {
                                 let msg = mls_message_out.try_into().expect("boo");
 
@@ -272,10 +289,29 @@ impl Processor {
                                 }
                             }
                             CryptoIdentityReply::MessageProcessed { result } => match result {
-                                ProcessedMessageResult::ApplicationMessage(_) => todo!(),
-                                ProcessedMessageResult::ProposalMessage => todo!(),
-                                ProcessedMessageResult::ExternalJoinProposal => todo!(),
-                                ProcessedMessageResult::StagedCommitMerged => todo!(),
+                                ProcessedMessageResult::ApplicationMessage(msg) => {
+                                    // Application message already decrypted
+                                    if let Err(e) = display_sender.send(msg).await {
+                                        error!("Unable to send decrypted message to display: {e}");
+                                    }
+                                }
+                                ProcessedMessageResult::ProposalMessage => {
+                                    // Regular proposal received and queued
+                                    tracing::debug!("Proposal message processed and queued");
+                                }
+                                ProcessedMessageResult::ExternalJoinProposal => {
+                                    // External join proposal received and queued
+                                    if let Err(e) = display_sender
+                                        .send("📥 External join proposal received. Use '/commit' to accept (not yet implemented).".to_string())
+                                        .await
+                                    {
+                                        error!("Unable to send external join notification: {e}");
+                                    }
+                                }
+                                ProcessedMessageResult::StagedCommitMerged => {
+                                    // Commit merged successfully
+                                    tracing::info!("Staged commit merged successfully");
+                                }
                             },
                             CryptoIdentityReply::GroupJoined { group_name } => {
                                 display_sender
@@ -314,13 +350,30 @@ impl Processor {
                                 }
                             }
                             CryptoIdentityReply::UserAnnouncement(announcement) => {
+                                // This can be either a UserAnnouncement or EncryptedGroupInfo
+                                // Check the body type to provide appropriate user feedback
+                                let message_type = match &announcement.body {
+                                    Some(agora_chat::agora_packet::Body::UserAnnouncement(_)) => {
+                                        "User announcement"
+                                    }
+                                    Some(agora_chat::agora_packet::Body::EncryptedGroupInfo(_)) => {
+                                        "HPKE-encrypted GroupInfo for external commit join"
+                                    }
+                                    _ => "Unknown message",
+                                };
+                                
                                 if let Err(e) = network_manager
                                     .send_message(crate::protobuf_wrapper::ProtoMlsMessageOut(
                                         announcement,
                                     ))
                                     .await
                                 {
-                                    error!("Failed to send user announcement over network: {}", e);
+                                    error!("Failed to send {} over network: {}", message_type, e);
+                                } else {
+                                    display_sender
+                                        .send(format!("📤 {} sent successfully", message_type))
+                                        .await
+                                        .expect("Unable to send status message to display");
                                 }
                             }
                             CryptoIdentityReply::Users { users } => {
@@ -357,112 +410,143 @@ impl Processor {
             loop {
                 match network_manager.receive_message().await {
                     Ok(packet) => {
-                        // Determine if the message is a user announcement or an MLS message
-                        if let Some(crate::agora_chat::agora_packet::Body::UserAnnouncement(
-                            user_announcement,
-                        )) = &packet.0.body
-                        {
-                            debug!(
-                                "Received UserAnnouncement from: {}",
-                                user_announcement.username
-                            );
+                        // Handle different message types
+                        match &packet.0.body {
+                            Some(crate::agora_chat::agora_packet::Body::UserAnnouncement(
+                                user_announcement,
+                            )) => {
+                                debug!(
+                                    "Received UserAnnouncement from: {}",
+                                    user_announcement.username
+                                );
 
-                            // send it to the crypto actor as a UserAnnouncement
-                            match crypto_actor
-                                .ask(CryptoIdentityMessage::AddNewUser {
-                                    user_announcement: user_announcement.clone(),
-                                })
-                                .await
-                            {
-                                Ok(reply) => match reply {
-                                    CryptoIdentityReply::Success => {
+                                // send it to the crypto actor as a UserAnnouncement
+                                match crypto_actor
+                                    .ask(CryptoIdentityMessage::AddNewUser {
+                                        user_announcement: user_announcement.clone(),
+                                    })
+                                    .await
+                                {
+                                    Ok(reply) => match reply {
+                                        CryptoIdentityReply::Success => {
+                                            display_sender
+                                                .send(format!(
+                                                    "Processed UserAnnouncement from {}",
+                                                    user_announcement.username
+                                                ))
+                                                .await
+                                                .expect("Unable to send the decrypted msg to display");
+                                        }
+                                        CryptoIdentityReply::Failure(e) => {
+                                            error!("Failed to process new UserAnnouncement: {e}");
+                                        }
+                                        _ => unreachable!("Pack it up boys. We are done here."),
+                                    },
+                                    Err(e) => {
                                         display_sender
-                                            .send(format!(
-                                                "Processed UserAnnouncement from {}",
-                                                user_announcement.username
-                                            ))
+                                            .send(e.to_string())
                                             .await
-                                            .expect("Unable to send the decrypted msg to display");
+                                            .expect("Unable to send the error msg to display");
                                     }
-                                    CryptoIdentityReply::Failure(e) => {
-                                        error!("Failed to process new UserAnnouncement: {e}");
-                                    }
-                                    _ => unreachable!("Pack it up boys. We are done here."),
-                                },
-                                Err(e) => {
-                                    display_sender
-                                        .send(e.to_string())
-                                        .await
-                                        .expect("Unable to send the error msg to display");
                                 }
                             }
-                        } else {
-                            // User announcements are handled above, other messages go to the crypto actor as MlsMessageIn
-                            let mls_message_in = if let Ok(msg) = packet.try_into() {
-                                msg
-                            } else {
-                                error!("Received invalid MlsMessageIn packet");
-                                continue;
-                            };
+                            Some(crate::agora_chat::agora_packet::Body::EncryptedGroupInfo(
+                                encrypted_group_info,
+                            )) => {
+                                // Received HPKE-encrypted GroupInfo for external commit join
+                                debug!(
+                                    "Received EncryptedGroupInfo ({} bytes) for external commit",
+                                    encrypted_group_info.hpke_ciphertext.len()
+                                );
+                                
+                                // TODO: Implement HPKE decryption and external commit creation
+                                // 1. Extract KEM output and ciphertext using kem_output_length
+                                // 2. HPKE open (decrypt) using local HPKE private key
+                                // 3. Deserialize decrypted bytes to GroupInfo
+                                // 4. Create external commit using the GroupInfo
+                                // 5. Send external commit to group members
+                                
+                                if let Err(e) = display_sender
+                                    .send(format!(
+                                        "📥 Received HPKE-encrypted GroupInfo for external commit join.\n\
+                                         ℹ️  Decryption and external commit creation not yet implemented."
+                                    ))
+                                    .await
+                                {
+                                    error!("Unable to send encrypted group info notification: {e}");
+                                }
+                            }
+                            _ => {
+                                // All other messages (PublicMessage, PrivateMessage, Welcome, GroupInfo)
+                                // go to the crypto actor as MlsMessageIn
+                                let mls_message_in = if let Ok(msg) = packet.try_into() {
+                                    msg
+                                } else {
+                                    error!("Received invalid MlsMessageIn packet");
+                                    continue;
+                                };
 
-                            match crypto_actor
-                                .ask(CryptoIdentityMessage::ProcessMessage { mls_message_in })
-                                .await
-                            {
-                                Ok(reply) => match reply {
-                                    CryptoIdentityReply::MessageProcessed { result } => {
-                                        // let's see what we got
-                                        match result {
-                                            ProcessedMessageResult::ApplicationMessage(m) => {
-                                                display_sender.send(format!("{m}")).await.expect(
-                                                    "Unable to send the decrypted msg to display",
-                                                );
-                                            }
-                                            ProcessedMessageResult::ProposalMessage => {
-                                                if let Err(e) = display_sender
-                                                    .send(format!(
-                                                        "Received ProposalMessage but don't know what to do with it."
-                                                    ))
-                                                    .await
-                                                {
-                                                    error!(
-                                                        "Unable to send the list of users to display: {e}"
+                                match crypto_actor
+                                    .ask(CryptoIdentityMessage::ProcessMessage { mls_message_in })
+                                    .await
+                                {
+                                    Ok(reply) => match reply {
+                                        CryptoIdentityReply::MessageProcessed { result } => {
+                                            // let's see what we got
+                                            match result {
+                                                ProcessedMessageResult::ApplicationMessage(m) => {
+                                                    display_sender.send(format!("{m}")).await.expect(
+                                                        "Unable to send the decrypted msg to display",
                                                     );
                                                 }
-                                            }
-                                            ProcessedMessageResult::ExternalJoinProposal => {
-                                                 if let Err(e) = display_sender
-                                                    .send(format!(
-                                                        "Received ExternalJoinProposal but don't know what to do with it."
-                                                    ))
-                                                    .await
-                                                {
-                                                    error!(
-                                                        "Unable to send the list of users to display: {e}"
-                                                    );
+                                                ProcessedMessageResult::ProposalMessage => {
+                                                    if let Err(e) = display_sender
+                                                        .send(format!(
+                                                            "Received ProposalMessage but don't know what to do with it."
+                                                        ))
+                                                        .await
+                                                    {
+                                                        error!(
+                                                            "Unable to send the list of users to display: {e}"
+                                                        );
+                                                    }
                                                 }
-                                            },
-                                            ProcessedMessageResult::StagedCommitMerged => {
-                                                if let Err(e) = display_sender
-                                                    .send(format!(
-                                                        "Staged commit merged successfully."
-                                                    ))
-                                                    .await
-                                                {
-                                                    error!(
-                                                        "Unable to send the list of users to display: {e}"
-                                                    );
+                                                ProcessedMessageResult::ExternalJoinProposal => {
+                                                     if let Err(e) = display_sender
+                                                        .send(format!(
+                                                            "📥 External join proposal received and queued.\n\
+                                                             ℹ️  An existing group member needs to commit this proposal.\n\
+                                                             ℹ️  Use '/commit' command to accept pending proposals (not yet implemented)."
+                                                        ))
+                                                        .await
+                                                    {
+                                                        error!(
+                                                            "Unable to send external join proposal notification to display: {e}"
+                                                        );
+                                                    }
+                                                },
+                                                ProcessedMessageResult::StagedCommitMerged => {
+                                                    if let Err(e) = display_sender
+                                                        .send(format!(
+                                                            "Staged commit merged successfully."
+                                                        ))
+                                                        .await
+                                                    {
+                                                        error!(
+                                                            "Unable to send the list of users to display: {e}"
+                                                        );
+                                                    }
                                                 }
                                             }
                                         }
+                                        _ => unreachable!(),
+                                    },
+                                    Err(e) => {
+                                        display_sender
+                                            .send(e.to_string())
+                                            .await
+                                            .expect("Unable to send the error msg to display");
                                     }
-                                    _ => unreachable!(),
-                                },
-                                Err(e) => {
-                                    display_sender
-                                        .send(e.to_string())
-                                        .await
-                                        .expect("Unable to send the error msg to display");
                                 }
                             }
                         }

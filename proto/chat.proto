@@ -19,6 +19,7 @@ message AgoraPacket {
     Welcome welcome = 4;
     GroupInfo group_info = 5;
     UserAnnouncement user_announcement = 7;
+    EncryptedGroupInfo encrypted_group_info = 8;
   }
 }
 
@@ -59,7 +60,24 @@ message GroupInfo {
 message UserAnnouncement {
   // The user's chosen display name/handle
   string username = 1;
-  
+
   // The raw bytes of the KeyPackage, serialized using tls_codec.
   bytes tls_serialized_key_package = 2;
+}
+
+// HPKE-encrypted GroupInfo for external commit joins.
+// This message contains the plaintext of the group id and a GroupInfo encrypted with the recipient's HPKE public key
+// from their KeyPackage, allowing secure transmission to a joining user who is
+// not yet a member of the group. The recipient can decrypt using their HPKE private
+// key and then use the GroupInfo to create an external commit.
+message EncryptedGroupInfo {
+  // The unique ID of the group this invite is for.
+  // This is sent in plaintext and used as the AAD for HPKE decryption.
+  bytes group_id = 1;
+
+  // The HPKE ciphertext containing the encrypted GroupInfo.
+  bytes hpke_ciphertext = 2;
+
+  // The length of the KEM output portion.
+  uint32 kem_output_length = 3;
 }

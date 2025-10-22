@@ -114,6 +114,11 @@ impl TryFrom<ProtoMlsMessageIn> for MlsMessageIn {
                     // Extract the KeyPackage bytes for MLS processing
                     m.tls_serialized_key_package
                 }
+                agora_chat::agora_packet::Body::EncryptedGroupInfo(m) => {
+                    // EncryptedGroupInfo contains HPKE-encrypted GroupInfo
+                    // This should be handled specially by the recipient for decryption
+                    m.hpke_ciphertext
+                }
             },
             // If the `body` is `None`, the message is invalid.
             None => return Err(ProtobufWrapperError::MlsMessageBodyInvalid),

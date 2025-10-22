@@ -1,7 +1,6 @@
 /// Possible input commands from the user.
 ///
 use clap::{Parser, Subcommand};
-use openmls::group::GroupId;
 
 use crate::crypto_identity_actor::{CryptoIdentityMessage, UserIdentity};
 

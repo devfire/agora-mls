@@ -10,7 +10,7 @@ pub struct AgoraPacket {
     /// The body of the message, corresponding to the MlsMessageBodyOut enum.
     /// The 'oneof' constraint ensures that a message can only be one of these types at a time,
     /// perfectly mapping the behavior of the Rust enum.
-    #[prost(oneof = "agora_packet::Body", tags = "2, 3, 4, 5, 7")]
+    #[prost(oneof = "agora_packet::Body", tags = "2, 3, 4, 5, 7, 8")]
     pub body: ::core::option::Option<agora_packet::Body>,
 }
 /// Nested message and enum types in `AgoraPacket`.
@@ -30,6 +30,8 @@ pub mod agora_packet {
         GroupInfo(super::GroupInfo),
         #[prost(message, tag = "7")]
         UserAnnouncement(super::UserAnnouncement),
+        #[prost(message, tag = "8")]
+        EncryptedGroupInfo(super::EncryptedGroupInfo),
     }
 }
 /// A wrapper for an MLS PublicMessage.
@@ -70,6 +72,24 @@ pub struct UserAnnouncement {
     /// The raw bytes of the KeyPackage, serialized using tls_codec.
     #[prost(bytes = "vec", tag = "2")]
     pub tls_serialized_key_package: ::prost::alloc::vec::Vec<u8>,
+}
+/// HPKE-encrypted GroupInfo for external commit joins.
+/// This message contains the plaintext of the group id and a GroupInfo encrypted with the recipient's HPKE public key
+/// from their KeyPackage, allowing secure transmission to a joining user who is
+/// not yet a member of the group. The recipient can decrypt using their HPKE private
+/// key and then use the GroupInfo to create an external commit.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct EncryptedGroupInfo {
+    /// The unique ID of the group this invite is for.
+    /// This is sent in plaintext and used as the AAD for HPKE decryption.
+    #[prost(bytes = "vec", tag = "1")]
+    pub group_id: ::prost::alloc::vec::Vec<u8>,
+    /// The HPKE ciphertext containing the encrypted GroupInfo.
+    #[prost(bytes = "vec", tag = "2")]
+    pub hpke_ciphertext: ::prost::alloc::vec::Vec<u8>,
+    /// The length of the KEM output portion.
+    #[prost(uint32, tag = "3")]
+    pub kem_output_length: u32,
 }
 /// Represents the MLS protocol version in use.
 /// This should be kept in sync with the versions supported by your OpenMLS implementation.
