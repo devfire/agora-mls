@@ -46,16 +46,6 @@ pub struct CryptoIdentityActor {
 
 #[derive(Debug)]
 pub enum CryptoIdentityMessage {
-    // /// Get public identity information (handle, verifying_key)
-    // GetIdentity,
-    // /// Get MLS key package for invites
-    // GetKeyPackage,
-    // /// Request signature operation (signing happens internally)
-    // SignData { data: Vec<u8> },
-
-    // /// Get MLS identity information (TEMPORARY - for backward compatibility)
-    // GetMlsIdentity,
-
     // === MLS Group Operations ===
     /// Create a new MLS group
     CreateGroup {
@@ -134,7 +124,7 @@ pub enum CryptoIdentityReply {
     GroupCreated(String),
 
     /// HPKE-encrypted GroupInfo for external commit join
-    EncryptedGroupInfoExported {
+    EncryptedGroupInfoForExternalInvite {
         encrypted_group_info: AgoraPacket, // EncryptedGroupInfo wrapped in AgoraPacket
     },
     /// Message encrypted successfully
@@ -477,7 +467,7 @@ impl CryptoIdentityActor {
         );
 
         // Return the encrypted GroupInfo wrapped in AgoraPacket for transmission
-        Ok(CryptoIdentityReply::EncryptedGroupInfoExported {
+        Ok(CryptoIdentityReply::EncryptedGroupInfoForExternalInvite {
             encrypted_group_info: agora_packet,
         })
     }
