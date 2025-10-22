@@ -10,6 +10,7 @@ use openmls::prelude::{
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::{OpenMlsRustCrypto, RustCrypto};
 use ssh_key::PrivateKey;
+use tracing::debug;
 use zeroize::Zeroizing;
 
 /// Combined actor managing both SSH identity and MLS protocol state.
@@ -204,7 +205,10 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                 }
             }
             CryptoIdentityMessage::AddMemberToGroup { key_package } => {
-                self.handle_add_member_to_group(key_package)
+                match self.handle_add_member_to_group(key_package) {
+                    Ok(reply) => reply,
+                    Err(e) => CryptoIdentityReply::Failure(e),
+                }
             }
             CryptoIdentityMessage::EncryptMessage(plaintext) => {
                 self.handle_encrypt_message(plaintext)
@@ -244,7 +248,10 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                 }
             }
             CryptoIdentityMessage::InviteUser(user_identity) => {
-                self.handle_invite_user(user_identity)
+                match self.handle_invite_user(user_identity) {
+                    Ok(reply) => reply,
+                    Err(e) => CryptoIdentityReply::Failure(e),
+                }
             }
             CryptoIdentityMessage::CreateAnnouncement => match self.create_user_announcement() {
                 Ok(reply) => reply,
@@ -324,17 +331,13 @@ impl CryptoIdentityActor {
         };
 
         // Create the group (signature_keypair stays private)
-        let group = match MlsGroup::new(
+        let group = MlsGroup::new(
             self.crypto_provider.as_ref(),
             &*self.signature_keypair,
             &mls_group_create_config,
             self.credential_with_key.clone(),
-        ) {
-            Ok(g) => g,
-            Err(e) => {
-                return Err(anyhow!("Group creation failed: {e}"));
-            }
-        };
+        )
+        .context("Group creation failed")?;
 
         // Get the GroupId value by cloning
         let group_id = group.group_id().clone();
@@ -370,12 +373,15 @@ impl CryptoIdentityActor {
     /// 4. Send encrypted ciphertext to recipient
     /// 5. Recipient decrypts with their HPKE private key
     /// 6. Recipient uses GroupInfo to create external commit
-    fn handle_add_member_to_group(&mut self, key_package: KeyPackage) -> CryptoIdentityReply {
+    fn handle_add_member_to_group(
+        &mut self,
+        key_package: KeyPackage,
+    ) -> Result<CryptoIdentityReply> {
         // Determine which group to use
         let active_group_id = match &self.active_group {
             Some(id) => id,
             None => {
-                return CryptoIdentityReply::Failure(anyhow!("No active group found"));
+                return Err(anyhow!("No active group found"));
             }
         };
 
@@ -383,7 +389,7 @@ impl CryptoIdentityActor {
         let active_group_ref = match self.groups.get(&active_group_id) {
             Some(g) => g,
             None => {
-                return CryptoIdentityReply::Failure(anyhow!("No active group found"));
+                return Err(anyhow!("No active group found"));
             }
         };
 
@@ -395,7 +401,7 @@ impl CryptoIdentityActor {
         ) {
             Ok(gi) => gi,
             Err(e) => {
-                return CryptoIdentityReply::Failure(anyhow!("Failed to export GroupInfo: {e}"));
+                return Err(anyhow!("Failed to export GroupInfo: {e}"));
             }
         };
 
@@ -403,7 +409,7 @@ impl CryptoIdentityActor {
         let group_info_bytes = match group_info_out.tls_serialize_detached() {
             Ok(bytes) => bytes,
             Err(e) => {
-                return CryptoIdentityReply::Failure(anyhow!("Failed to serialize GroupInfo: {e}"));
+                return Err(anyhow!("Failed to serialize GroupInfo: {e}"));
             }
         };
 
@@ -434,9 +440,7 @@ impl CryptoIdentityActor {
         ) {
             Ok(ct) => ct,
             Err(e) => {
-                return CryptoIdentityReply::Failure(anyhow!(
-                    "Failed to HPKE encrypt GroupInfo: {e}"
-                ));
+                return Err(anyhow!("Failed to HPKE encrypt GroupInfo: {e}"));
             }
         };
 
@@ -464,7 +468,7 @@ impl CryptoIdentityActor {
             )),
         };
 
-        tracing::info!(
+        debug!(
             "Exported and HPKE-encrypted GroupInfo ({} bytes: {} bytes KEM output + {} bytes ciphertext) for external commit join to group: {:?}",
             hpke_ciphertext_bytes.len(),
             kem_output_len,
@@ -473,9 +477,9 @@ impl CryptoIdentityActor {
         );
 
         // Return the encrypted GroupInfo wrapped in AgoraPacket for transmission
-        CryptoIdentityReply::EncryptedGroupInfoExported {
+        Ok(CryptoIdentityReply::EncryptedGroupInfoExported {
             encrypted_group_info: agora_packet,
-        }
+        })
     }
 
     /// Encrypt a message for a group
@@ -512,35 +516,6 @@ impl CryptoIdentityActor {
 
     /// Process an incoming MLS message
     fn handle_mls_message(&mut self, mls_message_in: MlsMessageIn) -> CryptoIdentityReply {
-        // // Determine which group to use
-        // let target_group_name = match group_name.or_else(|| self.active_group.clone()) {
-        //     Some(name) => name,
-        //     None => {
-        //         return CryptoIdentityReply::Failed {
-        //             message: "No active group specified".to_string(),
-        //         };
-        //     }
-        // };
-
-        // // Get the group
-        // let group = match self.groups.get_mut(&target_group_name) {
-        //     Some(g) => g,
-        //     None => {
-        //         return CryptoIdentityReply::Failed {
-        //             message: format!("Group '{}' not found", target_group_name),
-        //         };
-        //     }
-        // };
-        // let active_group_name = self
-        //     .active_group
-        //     .as_ref()
-        //     .ok_or()?;
-
-        // let incoming_group_id = mls_message_in.group_id();
-
-        // // extract the group name from the MlsGroup inbound
-        // let group_name = Self::extract_group_name(&mls_message_in);
-
         // Convert to ProtocolMessage
         let protocol_message = match mls_message_in.try_into_protocol_message() {
             Ok(pm) => pm,
@@ -672,15 +647,12 @@ impl CryptoIdentityActor {
     }
 
     /// Handle the new user invite request
-    fn handle_invite_user(&mut self, user_identity: UserIdentity) -> CryptoIdentityReply {
+    fn handle_invite_user(&mut self, user_identity: UserIdentity) -> Result<CryptoIdentityReply> {
         // Check if we have the user in our cache
         let key_package_in = match self.user_cache.get(&user_identity) {
             Some(kp) => kp.clone(),
             None => {
-                return CryptoIdentityReply::Failure(anyhow!(
-                    "User '{}' not found in cache",
-                    user_identity
-                ));
+                return Err(anyhow!("User '{}' not found in cache", user_identity));
             }
         };
 
@@ -689,7 +661,7 @@ impl CryptoIdentityActor {
             match key_package_in.validate(&RustCrypto::default(), ProtocolVersion::Mls10) {
                 Ok(vkp) => vkp,
                 Err(e) => {
-                    return CryptoIdentityReply::Failure(anyhow!(
+                    return Err(anyhow!(
                         "Invalid KeyPackage for user '{}': {}",
                         user_identity,
                         e
@@ -698,7 +670,7 @@ impl CryptoIdentityActor {
             };
 
         // Add the member to the active group
-        self.handle_add_member_to_group(validated_keypackage)
+        Ok(self.handle_add_member_to_group(validated_keypackage)?)
     }
 
     /// Process a received HPKE-encrypted GroupInfo to initiate an external join.
@@ -742,18 +714,15 @@ impl CryptoIdentityActor {
         let crypto = RustCrypto::default();
 
         // Decrypt using our OWN HPKE private key from our KeyPackageBundle.
-        let group_info_bytes = match crypto.hpke_open(
-            self.ciphersuite.hpke_config(),
-            &hpke_ciphertext,
-            self.mls_key_package_bundle.init_private_key(),
-            info,
-            aad,
-        ) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                return Err(anyhow!("Failed to HPKE decrypt GroupInfo: {e}"));
-            }
-        };
+        let group_info_bytes = crypto
+            .hpke_open(
+                self.ciphersuite.hpke_config(),
+                &hpke_ciphertext,
+                self.mls_key_package_bundle.init_private_key(),
+                info,
+                aad,
+            )
+            .context("Failed to HPKE decrypt GroupInfo")?;
 
         // ============================
         // 2. DESERIALIZE THE GroupInfo
@@ -948,7 +917,7 @@ impl CryptoIdentityActor {
     /// * If the key is not an Ed25519 key
     fn load_ssh_ed25519_key(key_path: &Path) -> Result<(SigningKey, VerifyingKey)> {
         let expanded_path =
-            shellexpand::tilde(key_path.to_str().expect("Expected to find the key file"))
+            shellexpand::tilde(key_path.to_str().context("Expected to find the key file")?)
                 .to_string();
         let key_data = fs::read_to_string(expanded_path)?;
 
