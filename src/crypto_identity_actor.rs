@@ -384,16 +384,13 @@ impl CryptoIdentityActor {
         };
 
         // Export the GroupInfo for the external joiner
-        let group_info_out = match active_group_ref.export_group_info(
-            &RustCrypto::default(),
-            &*self.signature_keypair,
-            true, // with_ratchet_tree - include the ratchet tree for external commits
-        ) {
-            Ok(gi) => gi,
-            Err(e) => {
-                return Err(anyhow!("Failed to export GroupInfo: {e}"));
-            }
-        };
+        let group_info_out = active_group_ref
+            .export_group_info(
+                &RustCrypto::default(),
+                &*self.signature_keypair,
+                true, // with_ratchet_tree - include the ratchet tree for external commits
+            )
+            .context("Failed to export GroupInfo")?;
 
         // Serialize GroupInfo to bytes for encryption
         let group_info_bytes = match group_info_out.tls_serialize_detached() {
@@ -449,6 +446,12 @@ impl CryptoIdentityActor {
             hpke_ciphertext: hpke_ciphertext_bytes.clone(),
             kem_output_length: kem_output_len,
         };
+
+        debug!(
+            "Serialized GroupInfo ({} bytes) for external commit: {:?}",
+            group_info_bytes.len(),
+            encrypted_group_info_proto
+        );
 
         // Wrap in AgoraPacket
         let agora_packet = agora_chat::AgoraPacket {
@@ -682,11 +685,23 @@ impl CryptoIdentityActor {
         // AAD must match what the sender used. We get it from the plaintext part of the message.
         let aad = &encrypted_group_info.group_id;
 
+        debug!(
+            "Received EncryptedGroupInfo for external commit join to group ID: {:?}",
+            GroupId::from_slice(&encrypted_group_info.group_id)
+        );
+
         // The info string must also match the sender's.
         let info = b"GroupInfo HPKE Encryption for External Commit";
 
         // Split the received ciphertext into its two parts using the provided length.
         let kem_output_len = encrypted_group_info.kem_output_length as usize;
+
+        debug!(
+            "Decrypting GroupInfo: total ciphertext length = {}, KEM output length = {}",
+            encrypted_group_info.hpke_ciphertext.len(),
+            kem_output_len
+        );
+
         let hpke_ciphertext_bytes = &encrypted_group_info.hpke_ciphertext;
 
         if hpke_ciphertext_bytes.len() < kem_output_len {
@@ -699,6 +714,12 @@ impl CryptoIdentityActor {
             kem_output: kem_output.to_vec().into(),
             ciphertext: ciphertext.to_vec().into(),
         };
+
+        debug!(
+            "Reconstructed HpkeCiphertext: KEM output = {:?}, ciphertext = {:?}",
+            hpke_ciphertext.kem_output.as_slice(),
+            hpke_ciphertext.ciphertext.as_slice()
+        );
 
         // Use openmls_rust_crypto's HPKE implementation via OpenMlsCryptoProvider trait
         let crypto = RustCrypto::default();
@@ -717,12 +738,20 @@ impl CryptoIdentityActor {
         // ============================
         // 2. DESERIALIZE THE GroupInfo
         // ============================
-        let verifiable_group_info =
-            group_info::VerifiableGroupInfo::tls_deserialize(&mut &group_info_bytes[..])
-                .context("Failed to deserialize GroupInfo")?;
+        // Deserialize as MlsMessageIn and extract GroupInfo
+        // First, deserialize the GroupInfoOut struct that the sender serialized
+        let deserialized_mls_message_in = MlsMessageIn::tls_deserialize(&mut &group_info_bytes[..])
+            .context("Failed to deserialize MlsMessageIn")?;
 
-        // 3. CREATE A NEW GROUP AND THE EXTERNAL COMMIT
-        // ===========================================
+        // Extract the GroupInfo from the MlsMessageIn
+        let verifiable_group_info = match deserialized_mls_message_in.extract() {
+            MlsMessageBodyIn::GroupInfo(group_info) => group_info,
+            _ => {
+                return Err(anyhow!(
+                    "Expected GroupInfo in MlsMessageIn, got different message type"
+                ));
+            }
+        };
 
         let (new_group_to_join, commit_message_bundle) = MlsGroup::external_commit_builder()
             .with_aad(aad.to_vec())
@@ -746,7 +775,10 @@ impl CryptoIdentityActor {
 
         // Store the group
         let group_id = new_group_to_join.group_id().clone();
-        self.groups.insert(group_id, new_group_to_join);
+        self.groups.insert(group_id.clone(), new_group_to_join);
+
+        // Set the newly joined group as active
+        self.active_group = Some(group_id);
 
         // Return the commit message to broadcast
         let (commit_message, _welcome, _group_info) = commit_message_bundle.into_contents();

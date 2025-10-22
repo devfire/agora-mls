@@ -5,7 +5,6 @@ use std::sync::Arc;
 use tracing::{debug, error};
 
 use crate::{
-    agora_chat,
     command::Command,
     crypto_identity_actor::{
         CryptoIdentityActor, CryptoIdentityMessage, CryptoIdentityReply, ProcessedMessageResult,
