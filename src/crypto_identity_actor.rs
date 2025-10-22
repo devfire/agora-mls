@@ -131,12 +131,7 @@ pub enum CryptoIdentityReply {
     // === MLS Operation Replies (NEW - Phase 2) ===
     /// Group created successfully
     GroupCreated(String),
-    /// Member added successfully (DEPRECATED - use GroupInfoExported for external commits)
-    WelcomePackage {
-        commit: MlsMessageOut,
-        welcome: MlsMessageOut,      // Welcome wrapped in MlsMessageOut
-        group_info: Option<Vec<u8>>, // Serialized GroupInfo
-    },
+
     /// HPKE-encrypted GroupInfo for external commit join
     EncryptedGroupInfoExported {
         encrypted_group_info: AgoraPacket, // EncryptedGroupInfo wrapped in AgoraPacket
@@ -743,7 +738,7 @@ impl CryptoIdentityActor {
         // 3. CREATE A NEW GROUP AND THE EXTERNAL COMMIT
         // ===========================================
 
-        let (mut new_group_to_join, commit_message_bundle) = MlsGroup::external_commit_builder()
+        let (new_group_to_join, commit_message_bundle) = MlsGroup::external_commit_builder()
             .with_aad(aad.to_vec())
             .build_group(
                 self.crypto_provider.as_ref(),
@@ -768,7 +763,8 @@ impl CryptoIdentityActor {
         self.groups.insert(group_id, new_group_to_join);
 
         // Return the commit message to broadcast
-        CryptoIdentityReply::MlsMessageOut(commit_message_bundle)
+        let (commit_message, _welcome, _group_info) = commit_message_bundle.into_contents();
+        CryptoIdentityReply::MlsMessageOut(commit_message)
     }
 
     fn create_user_announcement(&mut self) -> CryptoIdentityReply {

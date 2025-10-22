@@ -222,48 +222,7 @@ impl Processor {
                                     .await
                                     .expect("Unable to send the decrypted msg to display");
                             }
-                            CryptoIdentityReply::WelcomePackage {
-                                commit,
-                                welcome,
-                                group_info,
-                            } => {
-                                // The CryptoIdentityReply::MemberAdded returns the tuple (MlsMessageOut, Welcome, Option<GroupInfo>).
-                                // The MlsMessageOut contains a Commit message that needs to be fanned out to existing group members.
-                                // The Welcome message must be sent to the newly added members, along the optional GroupInfo if it is available.
-                                let _gi = group_info; // currently unused
-
-                                let commit_msg = if let Ok(msg) = commit.try_into() {
-                                    msg
-                                } else {
-                                    error!("Received invalid MlsMessageIn packet");
-                                    continue;
-                                };
-                                if let Err(e) = network_manager.send_message(commit_msg).await {
-                                    error!("Failed to send message over network: {}", e);
-                                }
-
-                                match welcome.try_into() {
-                                    Ok(welcome_msg) => {
-                                        if let Err(e) =
-                                            network_manager.send_message(welcome_msg).await
-                                        {
-                                            error!("Failed to send welcome message: {}", e);
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to convert welcome message: {}", e);
-                                    }
-                                }
-                                // TODO: need to figure out how to send group info properly
-                                // if let Some(group_info) = group_info {
-                                //     let group_info_msg = group_info.try_into().expect("boo");
-                                //     if let Err(e) =
-                                //         network_manager.send_message(group_info_msg).await
-                                //     {
-                                //         error!("Failed to send message over network: {}", e);
-                                //     }
-                                // }
-                            }
+                          
                             CryptoIdentityReply::EncryptedGroupInfoExported { encrypted_group_info } => {
                                 // HPKE-encrypted GroupInfo for external commit join
                                 // Send to network for the external joiner
@@ -458,14 +417,7 @@ impl Processor {
                                     "Received EncryptedGroupInfo ({} bytes) for external commit",
                                     encrypted_group_info.hpke_ciphertext.len()
                                 );
-                                
-                                // TODO: Implement HPKE decryption and external commit creation
-                                // 1. Extract KEM output and ciphertext using kem_output_length
-                                // 2. HPKE open (decrypt) using local HPKE private key
-                                // 3. Deserialize decrypted bytes to GroupInfo
-                                // 4. Create external commit using the GroupInfo
-                                // 5. Send external commit to group members
-                                
+
                                 if let Err(e) = display_sender
                                     .send(format!(
                                         "📥 Received HPKE-encrypted GroupInfo for external commit join.\n\
