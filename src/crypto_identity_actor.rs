@@ -100,18 +100,7 @@ pub enum CryptoIdentityMessage {
 
 #[derive(Reply)]
 pub enum CryptoIdentityReply {
-    // Identity {
-    //     handle: String,
-    //     verifying_key: VerifyingKey,
-    // },
-    // KeyPackage {
-    //     key_package: KeyPackage,
-    //     credential: CredentialWithKey,
-    // },
-    // Signature {
-    //     signature: Signature,
-    // },
-    UpdateComplete,
+
     // MlsIdentity {
     //     mls_key_package: KeyPackageBundle,
     //     credential_with_key: CredentialWithKey,
@@ -527,8 +516,7 @@ impl CryptoIdentityActor {
             Some(g) => g,
             None => {
                 return CryptoIdentityReply::Failure(anyhow!(
-                    "Group with ID '{:?}' not found",
-                    group_id
+                    CryptoIdentityActorError::GroupNotFound(format!("{:?}", group_id))
                 ));
             }
         };
@@ -984,7 +972,10 @@ impl CryptoIdentityActor {
 
 use std::fmt;
 
-use crate::agora_chat::{AgoraPacket, UserAnnouncement};
+use crate::{
+    agora_chat::{AgoraPacket, UserAnnouncement},
+    error::CryptoIdentityActorError,
+};
 
 /// User identity combining username and key fingerprint
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -5,10 +5,12 @@ use std::sync::Arc;
 use tracing::{debug, error};
 
 use crate::{
+    agora_chat::UserAnnouncement,
     command::Command,
     crypto_identity_actor::{
         CryptoIdentityActor, CryptoIdentityMessage, CryptoIdentityReply, ProcessedMessageResult,
     },
+    error::CryptoIdentityActorError,
     network, // state_actor::{StateActor, StateActorMessage, StateActorReply},
 };
 
@@ -214,7 +216,6 @@ impl Processor {
                     // Forward the command to the state actor and await the reply
                     match crypto_actor.ask(c).await {
                         Ok(reply) => match reply {
-                            CryptoIdentityReply::UpdateComplete => todo!(),
                             CryptoIdentityReply::GroupCreated(group_name) => {
                                 display_sender
                                     .send(format!("Group {group_name} created"))
@@ -266,16 +267,11 @@ impl Processor {
                                 }
                                 ProcessedMessageResult::ProposalMessage => {
                                     // Regular proposal received and queued
-                                    tracing::debug!("Proposal message processed and queued");
+                                    error!("Unexpected ProposalMessage in command handler task");
                                 }
                                 ProcessedMessageResult::ExternalJoinProposal => {
                                     // External join proposal received and queued
-                                    if let Err(e) = display_sender
-                                        .send("📥 External join proposal received. Use '/commit' to accept (not yet implemented).".to_string())
-                                        .await
-                                    {
-                                        error!("Unable to send external join notification: {e}");
-                                    }
+                                    error!("Unexpected ExternalJoinProposal in command handler task");
                                 }
                                 ProcessedMessageResult::StagedCommitMerged => {
                                     // Commit merged successfully
@@ -327,10 +323,12 @@ impl Processor {
                                 {
                                     error!("Failed to send User announcement over network: {}", e);
                                 } else {
-                                    display_sender
+                                    if let Err(e) = display_sender
                                         .send(format!("User announcement sent successfully"))
                                         .await
-                                        .expect("Unable to send status message to display");
+                                    {
+                                        error!("Unable to send error message: {e}");
+                                    }
                                 }
                             }
                             CryptoIdentityReply::Users { users } => {
@@ -372,43 +370,12 @@ impl Processor {
                             Some(crate::agora_chat::agora_packet::Body::UserAnnouncement(
                                 user_announcement,
                             )) => {
-                                debug!(
-                                    "Received UserAnnouncement from: {}",
-                                    user_announcement.username
-                                );
-
-                                // send it to the crypto actor as a UserAnnouncement
-                                match crypto_actor
-                                    .ask(CryptoIdentityMessage::AddNewUser {
-                                        user_announcement: user_announcement.clone(),
-                                    })
-                                    .await
-                                {
-                                    Ok(reply) => match reply {
-                                        CryptoIdentityReply::Success => {
-                                            if let Err(e) = display_sender
-                                                .send(format!(
-                                                    "Processed UserAnnouncement from {}",
-                                                    user_announcement.username
-                                                ))
-                                                .await
-                                            {
-                                                error!(
-                                                    "Unable to send the decrypted msg to display: {e}"
-                                                );
-                                            };
-                                        }
-                                        CryptoIdentityReply::Failure(e) => {
-                                            error!("Failed to process new UserAnnouncement: {e}");
-                                        }
-                                        _ => unreachable!("Pack it up boys. We are done here."),
-                                    },
-                                    Err(e) => {
-                                        if let Err(e) = display_sender.send(e.to_string()).await {
-                                            error!("Unable to send the error msg to display: {e}");
-                                        };
-                                    }
-                                }
+                                Self::handle_network_user_announcement(
+                                    user_announcement,
+                                    crypto_actor.clone(),
+                                    display_sender.clone(),
+                                )
+                                .await;
                             }
                             Some(crate::agora_chat::agora_packet::Body::EncryptedGroupInfo(
                                 encrypted_group_info,
@@ -517,11 +484,11 @@ impl Processor {
                                                     }
                                                 }
                                                 ProcessedMessageResult::ExternalJoinProposal => {
-                                                     if let Err(e) = display_sender
+                                                        if let Err(e) = display_sender
                                                         .send(format!(
                                                             "📥 External join proposal received and queued.\n\
-                                                             ℹ️  An existing group member needs to commit this proposal.\n\
-                                                             ℹ️  Use '/commit' command to accept pending proposals (not yet implemented)."
+                                                            ℹ️  An existing group member needs to commit this proposal.\n\
+                                                            ℹ️  Use '/commit' command to accept pending proposals (not yet implemented)."
                                                         ))
                                                         .await
                                                     {
@@ -544,7 +511,35 @@ impl Processor {
                                                 }
                                             }
                                         }
-                                        _ => unreachable!(),
+                                        CryptoIdentityReply::Failure(error) => {
+                                            // downcast the error to error type
+                                            match error.downcast_ref::<CryptoIdentityActorError>() {
+                                                Some(e) => {
+                                                    match e {
+                                                        // silently ignore it because there could traffic for other groups
+                                                        CryptoIdentityActorError::GroupNotFound(
+                                                            _g,
+                                                        ) => {}
+                                                    }
+                                                }
+                                                None => {
+                                                    error!(
+                                                        "Unknown error type received: {}",
+                                                        error
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            if let Err(e) = display_sender
+                                                .send(format!("Unexpected packet type."))
+                                                .await
+                                            {
+                                                error!(
+                                                    "Unable to send the list of users to display: {e}"
+                                                );
+                                            }
+                                        }
                                     },
                                     Err(e) => {
                                         display_sender
@@ -585,5 +580,47 @@ impl Processor {
             }
             debug!("Message display task ending.");
         })
+    }
+
+    async fn handle_network_user_announcement(
+        user_announcement: &UserAnnouncement,
+        crypto_actor: ActorRef<CryptoIdentityActor>,
+        display_sender: tokio::sync::mpsc::Sender<String>,
+    ) {
+        debug!(
+            "Received UserAnnouncement from: {}",
+            user_announcement.username
+        );
+
+        // send it to the crypto actor as a UserAnnouncement
+        match crypto_actor
+            .ask(CryptoIdentityMessage::AddNewUser {
+                user_announcement: user_announcement.clone(),
+            })
+            .await
+        {
+            Ok(reply) => match reply {
+                CryptoIdentityReply::Success => {
+                    if let Err(e) = display_sender
+                        .send(format!(
+                            "Processed UserAnnouncement from {}",
+                            user_announcement.username
+                        ))
+                        .await
+                    {
+                        error!("Unable to send the decrypted msg to display: {e}");
+                    };
+                }
+                CryptoIdentityReply::Failure(e) => {
+                    error!("Failed to process new UserAnnouncement: {e}");
+                }
+                _ => unreachable!("Pack it up boys. We are done here."),
+            },
+            Err(e) => {
+                if let Err(e) = display_sender.send(e.to_string()).await {
+                    error!("Unable to send the error msg to display: {e}");
+                };
+            }
+        }
     }
 }
