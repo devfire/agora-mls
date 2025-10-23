@@ -773,15 +773,22 @@ impl CryptoIdentityActor {
             .finalize(self.crypto_provider.as_ref())
             .context("error finalizing external commit")?;
 
-        // Store the group
+        // Extract the commit message that we will broadcast
+        let (commit_message, _welcome, _group_info) = commit_message_bundle.into_contents();
+
+        // Merge the pending commit to finalize our addition to the group
+        // This applies the external commit to our local group state
+        let mut new_group_to_join = new_group_to_join;
+        new_group_to_join
+            .merge_pending_commit(self.crypto_provider.as_ref())
+            .context("Failed to self merge pending external commit")?;
+
+        // =============================
         let group_id = new_group_to_join.group_id().clone();
         self.groups.insert(group_id.clone(), new_group_to_join);
 
-        // Set the newly joined group as active
+        // Set the newly joined group as active (as you correctly identified)
         self.active_group = Some(group_id);
-
-        // Return the commit message to broadcast
-        let (commit_message, _welcome, _group_info) = commit_message_bundle.into_contents();
         Ok(CryptoIdentityReply::MlsMessageOut(commit_message))
     }
 
