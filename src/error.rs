@@ -1,10 +1,3 @@
-use core::convert::Infallible;
-use kameo::error::SendError;
-use openmls::{
-    group::{AddMembersError, CreateMessageError, MergeCommitError, MergePendingCommitError, ProcessMessageError},
-    prelude::{KeyPackageVerifyError, WelcomeError},
-};
-use openmls_rust_crypto::MemoryStorageError;
 use prost::DecodeError;
 use std::net::SocketAddr;
 use thiserror::Error;
@@ -14,6 +7,28 @@ pub enum OpenSSHKeyError {
     #[error("Failed to read SSH key file: {ssh_key_file_path}")]
     MissingSshKeyFile { ssh_key_file_path: String },
 }
+
+// #[derive(Error, Debug)]
+// pub enum CryptoIdentityActorError {
+//     #[error("Group {0} not found")]
+//     GroupNotFound(String),
+
+//     #[error("Failed to set extensions {0}")]
+//     ExtensionError(String),
+
+//     #[error("Failed to create group: {0}")]
+//     GroupCreationFailed(String),
+
+//     #[error("Failed to add member")]
+//     AddMemberFailed(#[from] AddMembersError<MemoryStorageError>),
+
+//     #[error("Failed to merge staged commit {0}")]
+//     MlsMergeCommitError(String),
+
+//     #[error("Encryption failed: {0}")]
+//     MessageEncryptionFailed(String),
+
+// }
 
 #[derive(Error, Debug)]
 pub enum NetworkError {
@@ -43,86 +58,71 @@ pub enum NetworkError {
     InterfaceError { interface: String, message: String },
 }
 
-#[derive(Error, Debug)] // Note: Removed Clone, as some inner errors aren't clonable
-pub enum StateActorError {
-    #[error("User not found")]
-    UserNotFound,
+// #[derive(Error, Debug)] // Note: Removed Clone, as some inner errors aren't clonable
+// pub enum StateActorError {
+//     #[error("User not found")]
+//     UserNotFound,
 
-    #[error("Group not found")]
-    GroupNotFound,
+//     #[error("Channel not found")]
+//     ChannelNotFound,
 
-    #[error("Channel not found")]
-    ChannelNotFound,
+//     #[error("Safety number generation failed")]
+//     SafetyNumberGenerationFailed,
 
-    #[error("Failed to create group: {0}")]
-    GroupCreationFailed(#[from] anyhow::Error),
+//     #[error("No active group")]
+//     NoActiveGroup,
 
-    #[error("Safety number generation failed")]
-    SafetyNumberGenerationFailed,
+//     #[error("Actor communication failed: {0}")]
+//     ActorCommError(String),
 
-    #[error("No active group")]
-    NoActiveGroup,
+//     #[error("Failed to create MLS message: {0}")]
+//     MlsCreateMessageError(#[from] CreateMessageError),
 
-    #[error("Actor communication failed: {0}")]
-    ActorCommError(String),
+//     #[error("Failed to process MLS message: {0}")]
+//     MlsProcessMessageError(#[from] ProcessMessageError<Infallible>),
 
-    #[error("Failed to create MLS message: {0}")]
-    MlsCreateMessageError(#[from] CreateMessageError),
+//     #[error("Failed to store: {0}")]
+//     MlsMergeStorageError(#[from] MergeCommitError<MemoryStorageError>),
 
-    #[error("Failed to process MLS message: {0}")]
-    MlsProcessMessageError(#[from] ProcessMessageError<Infallible>),
+//     #[error("Failed to convert to/from Protobuf: {0}")]
+//     ProtobufConversionError(#[from] ProtobufWrapperError),
 
-    #[error("Failed to merge staged commit: {0}")]
-    MlsMergeCommitError(#[from] MergeCommitError<Infallible>),
+//     #[error("Invalid message received from network")]
+//     InvalidReceivedMessage,
 
-    #[error("Failed to store: {0}")]
-    MlsMergeStorageError(#[from] MergeCommitError<MemoryStorageError>),
+//     #[error("Failed to decode message as UTF-8: {0}")]
+//     InvalidUtf8(#[from] std::string::FromUtf8Error),
 
-    #[error("Failed to convert to/from Protobuf: {0}")]
-    ProtobufConversionError(#[from] ProtobufWrapperError),
+//     #[error("Feature not implemented")]
+//     NotImplemented,
 
-    #[error("Invalid message received from network")]
-    InvalidReceivedMessage,
+//     #[error("Missing verifying key in identity actor")]
+//     MissingVerifyingKey,
 
-    #[error("Failed to decode message as UTF-8: {0}")]
-    InvalidUtf8(#[from] std::string::FromUtf8Error),
+//     #[error("Invalid credential or missing required extension")]
+//     InvalidCredential,
 
-    #[error("Feature not implemented")]
-    NotImplemented,
+//     #[error("Failed to serialize MLS message to bytes")]
+//     MlsMessageError(#[from] openmls::framing::errors::MlsMessageError),
 
-    #[error("Missing verifying key in identity actor")]
-    MissingVerifyingKey,
+//     #[error("Failed to deserialize MLS packet")]
+//     MlsDeserializeError(#[from] openmls::prelude::Error),
 
-    #[error("Invalid credential or missing required extension")]
-    InvalidCredential,
+//     #[error("Failed to store MLS")]
+//     MlsProcessStorageError(#[from] ProcessMessageError<MemoryStorageError>),
 
-    #[error("Encryption failed")]
-    EncryptionFailed,
+//     #[error("Failed to validate KeyPackage")]
+//     KeyPackageValidationFailed(#[from] KeyPackageVerifyError),
 
-    #[error("Failed to serialize MLS message to bytes")]
-    MlsMessageError(#[from] openmls::framing::errors::MlsMessageError),
+//     #[error("Invalid composite key format (expected username@fingerprint)")]
+//     InvalidCompositeKey,
 
-    #[error("Failed to deserialize MLS packet")]
-    MlsDeserializeError(#[from] openmls::prelude::Error),
+//     #[error("Failed to process Welcome message")]
+//     WelcomeError(#[from] WelcomeError<MemoryStorageError>),
 
-    #[error("Failed to store MLS")]
-    MlsProcessStorageError(#[from] ProcessMessageError<MemoryStorageError>),
-
-    #[error("Failed to validate KeyPackage")]
-    KeyPackageValidationFailed(#[from] KeyPackageVerifyError),
-
-    #[error("Invalid composite key format (expected username@fingerprint)")]
-    InvalidCompositeKey,
-
-    #[error("Failed to add member")]
-    AddMemberFailed(#[from] AddMembersError<MemoryStorageError>),
-
-    #[error("Failed to process Welcome message")]
-    WelcomeError(#[from] WelcomeError<MemoryStorageError>),
-
-    #[error("Failed to merge pending commit: {0}")]
-    MlsMergePendingCommitError(#[from] MergePendingCommitError<MemoryStorageError>),
-}
+//     #[error("Failed to merge pending commit: {0}")]
+//     MlsMergePendingCommitError(#[from] MergePendingCommitError<MemoryStorageError>),
+// }
 
 #[derive(Error, Debug)]
 pub enum SafetyNumberError {
@@ -147,19 +147,19 @@ pub enum ProtobufWrapperError {
     MlsMessageInvalid(#[from] openmls::framing::errors::MlsMessageError),
 }
 
-// Add this implementation at the bottom of the file
-// Replace the previous `impl From<KameoError>` with this generic one
-impl<M> From<SendError<M>> for StateActorError {
-    fn from(err: SendError<M>) -> Self {
-        let err_msg = match err {
-            SendError::ActorNotRunning(_) => "Actor not running".to_string(),
-            SendError::ActorStopped => "Actor stopped before a reply could be received".to_string(),
-            SendError::MailboxFull(_) => "Actor's mailbox is full".to_string(),
-            SendError::HandlerError(_) => {
-                "An error occurred within the actor's handler".to_string()
-            }
-            SendError::Timeout(_) => "Timed out waiting for a reply".to_string(),
-        };
-        StateActorError::ActorCommError(err_msg)
-    }
-}
+// // Add this implementation at the bottom of the file
+// // Replace the previous `impl From<KameoError>` with this generic one
+// impl<M> From<SendError<M>> for StateActorError {
+//     fn from(err: SendError<M>) -> Self {
+//         let err_msg = match err {
+//             SendError::ActorNotRunning(_) => "Actor not running".to_string(),
+//             SendError::ActorStopped => "Actor stopped before a reply could be received".to_string(),
+//             SendError::MailboxFull(_) => "Actor's mailbox is full".to_string(),
+//             SendError::HandlerError(_) => {
+//                 "An error occurred within the actor's handler".to_string()
+//             }
+//             SendError::Timeout(_) => "Timed out waiting for a reply".to_string(),
+//         };
+//         StateActorError::ActorCommError(err_msg)
+//     }
+// }

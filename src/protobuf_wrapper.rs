@@ -5,7 +5,7 @@ use prost::Message;
 use std::ops::Deref;
 
 // Assuming your newtype is defined as:
-pub struct ProtoMlsMessageOut(pub agora_chat::MlsMessageOut);
+pub struct ProtoMlsMessageOut(pub agora_chat::AgoraPacket);
 
 /// Converts an OpenMLS [`MlsMessageOut`] into a protobuf [`ProtoMlsMessageOut`] wrapper.
 ///
@@ -35,25 +35,25 @@ impl TryFrom<MlsMessageOut> for ProtoMlsMessageOut {
                 let inner = agora_chat::PublicMessage {
                     tls_serialized_public_message: mls_message_bytes,
                 };
-                agora_chat::mls_message_out::Body::PublicMessage(inner)
+                agora_chat::agora_packet::Body::PublicMessage(inner)
             }
             MlsMessageBodyOut::PrivateMessage(_) => {
                 let inner = agora_chat::PrivateMessage {
                     tls_serialized_private_message: mls_message_bytes,
                 };
-                agora_chat::mls_message_out::Body::PrivateMessage(inner)
+                agora_chat::agora_packet::Body::PrivateMessage(inner)
             }
             MlsMessageBodyOut::Welcome(_) => {
                 let inner = agora_chat::Welcome {
                     tls_serialized_welcome_message: mls_message_bytes,
                 };
-                agora_chat::mls_message_out::Body::Welcome(inner)
+                agora_chat::agora_packet::Body::Welcome(inner)
             }
             MlsMessageBodyOut::GroupInfo(_) => {
                 let inner = agora_chat::GroupInfo {
                     tls_serialized_group_info: mls_message_bytes,
                 };
-                agora_chat::mls_message_out::Body::GroupInfo(inner)
+                agora_chat::agora_packet::Body::GroupInfo(inner)
             }
             // Note: KeyPackage is sent via UserAnnouncement, not as a standalone message
             MlsMessageBodyOut::KeyPackage(_) => {
@@ -62,7 +62,7 @@ impl TryFrom<MlsMessageOut> for ProtoMlsMessageOut {
             }
         };
 
-        let agora_chat_message_out = agora_chat::MlsMessageOut {
+        let agora_chat_message_out = agora_chat::AgoraPacket {
             version: agora_chat::ProtocolVersion::Mls10 as i32,
             body: Some(agora_chat_body),
         };
@@ -72,7 +72,7 @@ impl TryFrom<MlsMessageOut> for ProtoMlsMessageOut {
 }
 
 impl Deref for ProtoMlsMessageOut {
-    type Target = agora_chat::MlsMessageOut;
+    type Target = agora_chat::AgoraPacket;
 
     fn deref(&self) -> &Self::Target {
         // Return a reference to the inner data.
@@ -83,12 +83,12 @@ impl Deref for ProtoMlsMessageOut {
 // This newtype wraps the same generated struct, but its name
 // clarifies its role as an incoming message.
 #[derive(Debug)]
-pub struct ProtoMlsMessageIn(pub agora_chat::MlsMessageOut);
+pub struct ProtoMlsMessageIn(pub agora_chat::AgoraPacket);
 
 impl ProtoMlsMessageIn {
     /// Deserializes a byte slice into our Protobuf wrapper.
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtobufWrapperError> {
-        let proto_message = agora_chat::MlsMessageOut::decode(bytes)?;
+        let proto_message = agora_chat::AgoraPacket::decode(bytes)?;
         Ok(Self(proto_message))
     }
 }
@@ -103,18 +103,21 @@ impl TryFrom<ProtoMlsMessageIn> for MlsMessageIn {
         // Match on the `oneof` body to get the raw MLS message bytes.
         let mls_bytes = match proto_message.body {
             Some(body) => match body {
-                agora_chat::mls_message_out::Body::PublicMessage(m) => {
-                    m.tls_serialized_public_message
-                }
-                agora_chat::mls_message_out::Body::PrivateMessage(m) => {
+                agora_chat::agora_packet::Body::PublicMessage(m) => m.tls_serialized_public_message,
+                agora_chat::agora_packet::Body::PrivateMessage(m) => {
                     m.tls_serialized_private_message
                 }
-                agora_chat::mls_message_out::Body::Welcome(m) => m.tls_serialized_welcome_message,
-                agora_chat::mls_message_out::Body::GroupInfo(m) => m.tls_serialized_group_info,
-                agora_chat::mls_message_out::Body::UserAnnouncement(m) => {
+                agora_chat::agora_packet::Body::Welcome(m) => m.tls_serialized_welcome_message,
+                agora_chat::agora_packet::Body::GroupInfo(m) => m.tls_serialized_group_info,
+                agora_chat::agora_packet::Body::UserAnnouncement(m) => {
                     // UserAnnouncement contains both username and key package
                     // Extract the KeyPackage bytes for MLS processing
                     m.tls_serialized_key_package
+                }
+                agora_chat::agora_packet::Body::EncryptedGroupInfo(m) => {
+                    // EncryptedGroupInfo contains HPKE-encrypted GroupInfo
+                    // This should be handled specially by the recipient for decryption
+                    m.hpke_ciphertext
                 }
             },
             // If the `body` is `None`, the message is invalid.

@@ -2,6 +2,8 @@
 ///
 use clap::{Parser, Subcommand};
 
+use crate::crypto_identity_actor::{CryptoIdentityMessage, UserIdentity};
+
 #[derive(Parser, Debug)]
 #[command(disable_help_flag = true)]
 #[command(name = "")]
@@ -48,7 +50,7 @@ pub enum Command {
     /// Display information about current active group or set active group
     Group {
         /// Set group to active
-        name: Option<String>,
+        name: String,
     },
 
     /// Generate the safety number for the current identity
@@ -108,5 +110,26 @@ impl Command {
         println!("│    /nick CoolUser                                       │");
         println!("│                                                         │");
         println!("╰─────────────────────────────────────────────────────────╯");
+    }
+}
+
+// In src/command.rs
+impl Command {
+    pub fn to_crypto_message(&self) -> Option<CryptoIdentityMessage> {
+        match self {
+            Command::Create { name } => Some(CryptoIdentityMessage::CreateGroup {
+                group_name: name.clone(),
+            }),
+            Command::Invite { nick, .. } => nick
+                .parse::<UserIdentity>()
+                .ok()
+                .map(CryptoIdentityMessage::InviteUser),
+            Command::Groups => Some(CryptoIdentityMessage::ListGroups),
+            Command::Group { name } => Some(CryptoIdentityMessage::SetActiveGroup(name.to_owned())),
+            Command::Users => Some(CryptoIdentityMessage::ListUsers),
+            Command::Announce => Some(CryptoIdentityMessage::CreateAnnouncement),
+            // Non-crypto commands return None
+            _ => None,
+        }
     }
 }

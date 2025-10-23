@@ -1,11 +1,10 @@
 use crate::{
     command::Command,
     config::Config,
-    identity_actor::IdentityActor,
+    crypto_identity_actor::CryptoIdentityActor,
     network::{NetworkConfigBuilder, NetworkManager},
-    openmls_actor::OpenMlsActor,
     processor::Processor,
-    state_actor::StateActor,
+    // state_actor::StateActor,
 };
 use anyhow::Result;
 use kameo::prelude::*;
@@ -46,18 +45,16 @@ impl App {
         // Create a channel for sending messages to the message handler
         let (message_sender, message_receiver) = tokio::sync::mpsc::channel::<String>(100);
 
-        let identity_actor_ref = IdentityActor::spawn(IdentityActor::new(
+        // Create the combined crypto identity actor (merges IdentityActor + OpenMlsActor)
+        // This fixes the security vulnerability by keeping all private keys encapsulated
+        let crypto_identity_ref = CryptoIdentityActor::spawn(CryptoIdentityActor::new(
             &self.config.key_file,
             &self.config.chat_id,
         )?);
 
-        let openmls_identity_actor_ref =
-            OpenMlsActor::spawn(OpenMlsActor::new(&identity_actor_ref).await);
-
-        let state_actor_ref = StateActor::spawn(StateActor::new(
-            identity_actor_ref.clone(),
-            openmls_identity_actor_ref.clone(),
-        ));
+        // let state_actor_ref = StateActor::spawn(StateActor::new(
+        //     crypto_identity_ref.clone(),
+        // ));
 
         // Kick off the processor & share everything it needs
         let processor = Processor::new(self.config.chat_id.clone(), Arc::clone(&network_manager));
@@ -71,20 +68,20 @@ impl App {
         );
 
         let command_handle = processor.spawn_command_handler_task(
-            state_actor_ref.clone(),
+            crypto_identity_ref.clone(),
             command_receiver,
             display_sender.clone(),
         );
 
         let message_handle = processor.spawn_message_handler_task(
-            state_actor_ref.clone(),
+            crypto_identity_ref.clone(),
             message_receiver,
             display_sender.clone(),
         );
 
         // Start the UDP intake task to listen for incoming messages
         let udp_intake_handle =
-            processor.spawn_udp_input_task(state_actor_ref.clone(), display_sender.clone());
+            processor.spawn_udp_input_task(crypto_identity_ref.clone(), display_sender.clone());
 
         // Start the display task to show messages to the user
         let display_handle = processor.spawn_message_display_task(display_receiver);
