@@ -265,17 +265,9 @@ impl Processor {
                                         error!("Unable to send decrypted message to display: {e}");
                                     }
                                 }
-                                ProcessedMessageResult::ProposalMessage => {
+                                _ => {
                                     // Regular proposal received and queued
-                                    error!("Unexpected ProposalMessage in command handler task");
-                                }
-                                ProcessedMessageResult::ExternalJoinProposal => {
-                                    // External join proposal received and queued
-                                    error!("Unexpected ExternalJoinProposal in command handler task");
-                                }
-                                ProcessedMessageResult::StagedCommitMerged => {
-                                    // Commit merged successfully
-                                    tracing::info!("Staged commit merged successfully");
+                                    error!("Unexpected message in command handler task");
                                 }
                             },
                             CryptoIdentityReply::GroupJoined { group_name } => {
@@ -471,32 +463,7 @@ impl Processor {
                                                         "Unable to send the decrypted msg to display",
                                                     );
                                                 }
-                                                ProcessedMessageResult::ProposalMessage => {
-                                                    if let Err(e) = display_sender
-                                                        .send(format!(
-                                                            "Received ProposalMessage but don't know what to do with it."
-                                                        ))
-                                                        .await
-                                                    {
-                                                        error!(
-                                                            "Unable to send the list of users to display: {e}"
-                                                        );
-                                                    }
-                                                }
-                                                ProcessedMessageResult::ExternalJoinProposal => {
-                                                        if let Err(e) = display_sender
-                                                        .send(format!(
-                                                            "📥 External join proposal received and queued.\n\
-                                                            ℹ️  An existing group member needs to commit this proposal.\n\
-                                                            ℹ️  Use '/commit' command to accept pending proposals (not yet implemented)."
-                                                        ))
-                                                        .await
-                                                    {
-                                                        error!(
-                                                            "Unable to send external join proposal notification to display: {e}"
-                                                        );
-                                                    }
-                                                },
+
                                                 ProcessedMessageResult::StagedCommitMerged => {
                                                     if let Err(e) = display_sender
                                                         .send(format!(

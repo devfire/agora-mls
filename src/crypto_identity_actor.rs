@@ -126,12 +126,12 @@ pub enum CryptoIdentityReply {
     GroupJoined {
         group_name: String,
     },
-    /// List of groups
+    /// List of groups returned in response to ListGroups command or /groups
     Groups {
         groups: Vec<String>,
     },
 
-    /// List of known users
+    /// List of known users returned in response to ListUsers command or /users
     Users {
         users: Vec<String>,
     },
@@ -156,11 +156,7 @@ pub enum CryptoIdentityReply {
 pub enum ProcessedMessageResult {
     /// Decrypted application message
     ApplicationMessage(String),
-    /// Received a proposal (not yet committed)
-    ProposalMessage,
-    /// Received an external join proposal
-    ExternalJoinProposal,
-    /// Staged commit merged successfully
+
     StagedCommitMerged,
 }
 
@@ -184,7 +180,7 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                 }
             }
             CryptoIdentityMessage::AddMemberToGroup { key_package } => {
-                match self.handle_add_member_to_group(key_package) {
+                match self.handle_add_new_member_to_group(key_package) {
                     Ok(reply) => reply,
                     Err(e) => CryptoIdentityReply::Failure(e),
                 }
@@ -352,7 +348,7 @@ impl CryptoIdentityActor {
     /// 4. Send encrypted ciphertext to recipient
     /// 5. Recipient decrypts with their HPKE private key
     /// 6. Recipient uses GroupInfo to create external commit
-    fn handle_add_member_to_group(
+    fn handle_add_new_member_to_group(
         &mut self,
         key_package: KeyPackage,
     ) -> Result<CryptoIdentityReply> {
@@ -496,7 +492,7 @@ impl CryptoIdentityActor {
         CryptoIdentityReply::MlsMessageOut(mls_message_out)
     }
 
-    /// Process an incoming MLS message
+    /// Process an incoming MLS message from crypto_actor.ask(CryptoIdentityMessage::ProcessMessage { mls_message_in }) in processor.rs
     fn handle_mls_message(&mut self, mls_message_in: MlsMessageIn) -> CryptoIdentityReply {
         // Convert to ProtocolMessage
         let protocol_message = match mls_message_in.try_into_protocol_message() {
@@ -530,7 +526,7 @@ impl CryptoIdentityActor {
                 }
             };
 
-        // Handle different content types
+        // Handle different content types. Only ApplicationMessage and StagedCommitMessage are supported here.
         let result = match processed_message.into_content() {
             ProcessedMessageContent::ApplicationMessage(app_msg) => {
                 match String::from_utf8(app_msg.into_bytes()) {
@@ -542,24 +538,6 @@ impl CryptoIdentityActor {
                     }
                 }
             }
-            ProcessedMessageContent::ProposalMessage(_) => ProcessedMessageResult::ProposalMessage,
-            ProcessedMessageContent::ExternalJoinProposalMessage(external_join_proposal) => {
-                // The proposal has been automatically added to the group's proposal queue
-                // by OpenMLS during process_message(). An existing group member needs to
-                // commit this proposal to complete the external join.
-
-                // Log the external join attempt for visibility
-                tracing::info!(
-                    "External join proposal received in group: {:?}. Proposal queued for commit.",
-                    group.group_id()
-                );
-
-                // Store proposal reference if needed for tracking
-                // Note: OpenMLS handles the proposal queue internally
-                let _proposal_ref = external_join_proposal.proposal();
-
-                ProcessedMessageResult::ExternalJoinProposal
-            }
             ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
                 // Merge the staged commit
                 if let Err(e) =
@@ -570,6 +548,11 @@ impl CryptoIdentityActor {
                     ));
                 }
                 ProcessedMessageResult::StagedCommitMerged
+            }
+            _ => {
+                return CryptoIdentityReply::Failure(anyhow!(
+                    "Unsupported message content type"
+                ));
             }
         };
 
@@ -651,7 +634,7 @@ impl CryptoIdentityActor {
             };
 
         // Add the member to the active group
-        Ok(self.handle_add_member_to_group(validated_keypackage)?)
+        Ok(self.handle_add_new_member_to_group(validated_keypackage)?)
     }
 
     /// Process a received HPKE-encrypted GroupInfo to initiate an external join.
