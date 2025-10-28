@@ -221,7 +221,12 @@ impl Hinter for CommandCompleter {
     }
 }
 
-impl Highlighter for CommandCompleter {}
+impl Highlighter for CommandCompleter {
+    fn highlight_hint<'h>(&self, hint: &'h str) -> std::borrow::Cow<'h, str> {
+        // Use ANSI escape code for grey/dim text
+        std::borrow::Cow::Owned(format!("\x1b[90m{}\x1b[0m", hint))
+    }
+}
 
 impl Validator for CommandCompleter {}
 
