@@ -39,6 +39,10 @@ pub struct CryptoIdentityActor {
     // == User nick to KeyPackage mapping ===
     user_cache: HashMap<UserIdentity, KeyPackageIn>,
 
+    // TODO: needs to be merged with groups so the key is a struct with name + id.
+    // Otherwise, I can create a group and someone else can create a group with the same name but different ID.
+    // Which is OK but will cause collisions when switching groups by name.
+    // Will also need to display group+id in /groups output and stdin chat intake.
     group_name_to_id: HashMap<String, GroupId>,
 }
 

@@ -431,110 +431,13 @@ impl Processor {
                             Some(crate::agora_chat::agora_packet::Body::EncryptedGroupInfo(
                                 encrypted_group_info,
                             )) => {
-                                // Received HPKE-encrypted GroupInfo for external commit join
-                                let sender_info = if !encrypted_group_info.sender_username.is_empty() {
-                                    format!(" from {}", encrypted_group_info.sender_username)
-                                } else {
-                                    String::new()
-                                };
-                                
-                                let total_size = encrypted_group_info.kem_output.len() + encrypted_group_info.ciphertext.len();
-                                
-                                debug!(
-                                    "Received EncryptedGroupInfo ({} bytes) for external commit{}",
-                                    total_size,
-                                    sender_info
-                                );
-
-                                // Display who invited us and store their KeyPackage for future communication
-                                if !encrypted_group_info.sender_username.is_empty() {
-                                    if let Err(e) = display_sender
-                                        .send(format!(
-                                            "Received group invitation from {}",
-                                            encrypted_group_info.sender_username
-                                        ))
-                                        .await
-                                    {
-                                        error!("Unable to send invitation notification to display: {e}");
-                                    }
-                                    
-                                    // Store the sender's KeyPackage so we can message them back
-                                    if !encrypted_group_info.sender_key_package.is_empty() {
-                                        let sender_announcement = UserAnnouncement {
-                                            username: encrypted_group_info.sender_username.clone(),
-                                            tls_serialized_key_package: encrypted_group_info.sender_key_package.clone(),
-                                        };
-                                        
-                                        Self::handle_network_user_announcement(
-                                            &sender_announcement,
-                                            crypto_actor.clone(),
-                                            display_sender.clone(),
-                                        )
-                                        .await;
-                                    }
-                                }
-
-                                // Send this to crypto actor for decryption and external commit creation
-                                match crypto_actor
-                                    .ask(CryptoIdentityMessage::ProcessEncryptedGroupInfo {
-                                        encrypted_group_info: encrypted_group_info.clone(),
-                                    })
-                                    .await
-                                {
-                                    Ok(reply) => match reply {
-                                        CryptoIdentityReply::MlsMessageOut(commit) => {
-                                            // Convert to ProtoMlsMessageOut and send over network
-                                            let mls_message_out_external_commit = if let Ok(msg) =
-                                                commit.try_into()
-                                            {
-                                                msg
-                                            } else {
-                                                error!(
-                                                    "Received invalid MlsMessageOut packet for external commit"
-                                                );
-                                                continue;
-                                            };
-                                            // Send the external commit message to the network
-                                            if let Err(e) = network_manager
-                                                .send_message(mls_message_out_external_commit)
-                                                .await
-                                            {
-                                                error!(
-                                                    "Failed to send external commit over network: {}",
-                                                    e
-                                                );
-                                            };
-                                            if let Err(e) = display_sender
-                                                .send(format!(
-                                                    "Decrypted EncryptedGroupInfo and created external commit successfully."
-                                                ))
-                                                .await
-                                            {
-                                                error!(
-                                                    "Unable to send the decrypted msg to display: {e}"
-                                                );
-                                            };
-                                        }
-                                        CryptoIdentityReply::Failure(e) => {
-                                            error!("Failed to process EncryptedGroupInfo: {e}");
-                                        }
-                                        _ => unreachable!("Some horrible thing happened."),
-                                    },
-                                    Err(e) => {
-                                        if let Err(e) = display_sender.send(e.to_string()).await {
-                                            error!("Unable to send the error msg to display: {e}");
-                                        };
-                                    }
-                                }
-
-                                if let Err(e) = display_sender
-                                    .send(format!(
-                                        "Received HPKE-encrypted GroupInfo for external commit join."
-                                    ))
-                                    .await
-                                {
-                                    error!("Unable to send encrypted group info notification: {e}");
-                                }
+                                Self::fun_name(
+                                    &crypto_actor,
+                                    &display_sender,
+                                    &network_manager,
+                                    encrypted_group_info,
+                                )
+                                .await;
                             }
                             _ => {
                                 // All other messages (PublicMessage, PrivateMessage, Welcome, GroupInfo)
@@ -686,6 +589,94 @@ impl Processor {
                     error!("Unable to send the error msg to display: {e}");
                 };
             }
+        }
+    }
+
+    async fn fun_name(
+        crypto_actor: &ActorRef<CryptoIdentityActor>,
+        display_sender: &tokio::sync::mpsc::Sender<String>,
+        network_manager: &Arc<network::NetworkManager>,
+        encrypted_group_info: &crate::agora_chat::EncryptedGroupInfo,
+    ) {
+        if !encrypted_group_info.sender_username.is_empty() {
+            if let Err(e) = display_sender
+                .send(format!(
+                    "Received group invitation from {}",
+                    encrypted_group_info.sender_username
+                ))
+                .await
+            {
+                error!("Unable to send invitation notification to display: {e}");
+            }
+
+            // Store the sender's KeyPackage so we can message them back
+            if !encrypted_group_info.sender_key_package.is_empty() {
+                let sender_announcement = UserAnnouncement {
+                    username: encrypted_group_info.sender_username.clone(),
+                    tls_serialized_key_package: encrypted_group_info.sender_key_package.clone(),
+                };
+
+                Self::handle_network_user_announcement(
+                    &sender_announcement,
+                    crypto_actor.clone(),
+                    display_sender.clone(),
+                )
+                .await;
+            }
+        }
+        match crypto_actor
+            .ask(CryptoIdentityMessage::ProcessEncryptedGroupInfo {
+                encrypted_group_info: encrypted_group_info.clone(),
+            })
+            .await
+        {
+            Ok(reply) => match reply {
+                CryptoIdentityReply::MlsMessageOut(commit) => {
+                    // Convert to ProtoMlsMessageOut and send over network
+                    let mls_message_out_external_commit = if let Ok(msg) = commit.try_into() {
+                        msg
+                    } else {
+                        error!("Received invalid MlsMessageOut packet for external commit");
+                        return;
+                    };
+                    // Send the external commit message to the network
+                    if let Err(e) = network_manager
+                        .send_message(mls_message_out_external_commit)
+                        .await
+                    {
+                        error!("Failed to send external commit over network: {}", e);
+                    };
+                    if let Err(e) = display_sender
+                        .send(format!(
+                            "Decrypted EncryptedGroupInfo and created external commit successfully."
+                        ))
+                        .await
+                    {
+                        error!("Unable to send the decrypted msg to display: {e}");
+                    };
+                }
+                CryptoIdentityReply::Failure(e) => {
+                    error!("Failed to process EncryptedGroupInfo: {e}");
+                }
+                _ => unreachable!("Some horrible thing happened."),
+            },
+            Err(e) => {
+                if let Err(e) = display_sender.send(e.to_string()).await {
+                    error!("Unable to send the error msg to display: {e}");
+                };
+            }
+        }
+        // Display who invited us and store their KeyPackage for future communication
+
+        // Send this to crypto actor for decryption and external commit creation
+
+        if let Err(e) = display_sender
+            .send(format!(
+                "Received HPKE-encrypted GroupInfo for external commit join."
+            ))
+            .await
+        {
+            error!("Unable to send encrypted group info notification: {e}");
         }
     }
 }
