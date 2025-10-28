@@ -1,6 +1,7 @@
 use kameo::prelude::ActorRef;
 
-use rustyline::{DefaultEditor, error::ReadlineError};
+use parking_lot::Mutex; // for more efficient locking
+use rustyline::{Editor, config::Builder, error::ReadlineError, history::DefaultHistory};
 use std::sync::Arc;
 use tracing::{debug, error};
 
@@ -17,6 +18,20 @@ use crate::{
 pub struct Processor {
     pub network_manager: Arc<network::NetworkManager>,
     pub nick: String,
+
+    // we can't access self directly inside the spawn_stdin_input_task blocking closure.
+    // Why not?
+    // The Technical Reason
+    // When you use tokio::task::spawn_blocking(move || { ... }), you're creating a closure that:
+    //
+    // Must be 'static - The closure needs to potentially outlive the current scope because it's being moved to a separate blocking thread pool that Tokio manages
+    // Takes ownership - The move keyword means the closure takes ownership of any variables it captures
+    // The problem is that self in the method signature is a reference (&self), not owned data.
+    // In Rust:
+    // You can't move a borrowed reference into a 'static closure
+    // The lifetime of &self is tied to the Processor instance, but the spawned thread might outlive that instance
+    // Rust's borrow checker prevents this to ensure memory safety
+    pub current_group: Arc<Mutex<Option<String>>>,
 }
 
 impl Processor {
@@ -29,6 +44,7 @@ impl Processor {
         Self {
             network_manager,
             nick,
+            current_group: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -37,7 +53,6 @@ impl Processor {
         &self,
         command_sender: tokio::sync::mpsc::Sender<Command>,
         message_sender: tokio::sync::mpsc::Sender<String>,
-        display_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         // get the chat handle from the state actor
 
@@ -60,21 +75,55 @@ impl Processor {
         The correct way to handle blocking code within a tokio runtime is to use tokio::task::spawn_blocking.
         This moves the blocking operation to a dedicated thread pool for blocking tasks, leaving the main tokio worker threads free to continue running other async tasks.
         */
+
+        // Remember: the nick is immutable for the duration of this task because it was passed as a parameter during the initialization of Processor.
+        // And that came via -l from App config which is fixed for the app lifetime.
         let nick = self.nick.clone();
+
+        let current_group = Arc::clone(&self.current_group);
         tokio::task::spawn_blocking(move || {
             // debug!("Starting stdin input task for agent '{}'", handle);
-            let mut rustyline_editor = match DefaultEditor::new() {
-                Ok(editor) => editor,
-                Err(e) => {
-                    error!("Unable to initialize the rustyline editor {e}");
-                    return;
-                }
-            };
 
+            let config = Builder::new().auto_add_history(true).build();
+
+            let mut rustyline_editor =
+                match Editor::<crate::command::CommandCompleter, DefaultHistory>::with_config(
+                    config,
+                ) {
+                    Ok(mut editor) => {
+                        editor.set_helper(Some(crate::command::CommandCompleter));
+                        editor
+                    }
+                    Err(e) => {
+                        error!("Unable to initialize the rustyline editor {e}");
+                        return;
+                    }
+                };
+
+            // let mut printer = match rustyline_editor.create_external_printer() {
+            //     Ok(p) => p,
+            //     Err(e) => {
+            //         error!("Unable to create rustyline external printer: {e}");
+            //         return;
+            //     }
+            // };
             // This just fans out commands & messages to the respective handlers very fast.
-            // Replies either go to the display or to the network outbound
+            // Replies either go to the display or to the network outbound.
             loop {
-                let readline = rustyline_editor.readline(&format!("{} > ", nick));
+                // Build prompt with group indicator
+                let prompt = {
+                    // NOTE:  The unwrap() on a mutex lock can panic if the mutex is "poisoned" (a thread panicked while holding the lock).
+                    // However, parking_lot's Mutex lock method does not return a Result, it directly returns the lock guard.
+                    // This means that if a thread panics while holding the lock, other threads trying to acquire the lock will not panic,
+                    // but will instead block until the lock is available.
+                    let group = current_group.lock(); // parking lot! 
+                    if let Some(ref g) = *group {
+                        format!("\x1b[36m[{}]\x1b[0m {} > ", g, nick)
+                    } else {
+                        format!("{} > ", nick)
+                    }
+                };
+                let readline = rustyline_editor.readline(&prompt);
 
                 match readline {
                     Ok(line) => {
@@ -102,12 +151,7 @@ impl Processor {
                                     if e.kind() == clap::error::ErrorKind::DisplayHelp {
                                         Command::show_custom_help();
                                     } else {
-                                        debug!("Command processing failed with {e}");
-                                        if display_sender.blocking_send(e.to_string()).is_err() {
-                                            error!(
-                                                "Unable to send error from spawn_stdin_input_task"
-                                            );
-                                        }
+                                        error!("Command processing failed with {e}");
                                         continue;
                                     }
                                 }
@@ -138,7 +182,7 @@ impl Processor {
     }
 
     /// Spawn a task to handle messages from stdin and forward them to the network manager.
-    pub fn spawn_message_handler_task(
+    pub fn spawn_ui_input_handler_task(
         &self,
         crypto_actor: ActorRef<CryptoIdentityActor>,
         mut receiver: tokio::sync::mpsc::Receiver<String>,
@@ -201,10 +245,25 @@ impl Processor {
     ) -> tokio::task::JoinHandle<()> {
         // let identity_handle = self.identity.handle.clone();
         let network_manager = Arc::clone(&self.network_manager);
+        let current_group = Arc::clone(&self.current_group);
+
         tokio::spawn(async move {
             debug!("Starting command handler task.");
             while let Some(command) = receiver.recv().await {
                 debug!("Command handler received command: {:?}", command);
+
+                // Update local state for UI when switching groups
+                if let Command::Group { ref name } = command {
+                    let mut group = current_group.lock();
+                    *group = Some(name.clone());
+                    println!("\x1b[32m✓ Switched to group: {}\x1b[0m", name);
+                }
+
+                // Also update when creating a group
+                if let Command::CreateGroup { ref name } = command {
+                    let mut group = current_group.lock();
+                    *group = Some(name.clone());
+                }
 
                 // The flow is like is:
                 // 1. User types in command in stdin_input_task via rustyline
@@ -283,7 +342,7 @@ impl Processor {
                                     .await
                                     .expect("Unable to send the decrypted msg to display");
                             }
-                            CryptoIdentityReply::ActiveGroup { group_name } => {
+                            CryptoIdentityReply::CurrentGroup { group_name } => {
                                 let active_group_name =
                                     group_name.unwrap_or("No active group".to_string());
 
@@ -533,19 +592,21 @@ impl Processor {
         mut receiver: tokio::sync::mpsc::Receiver<String>,
     ) -> tokio::task::JoinHandle<()> {
         let nick = self.nick.clone();
-        tokio::spawn(async move {
-            debug!("Starting message display task.");
+        let current_group = Arc::clone(&self.current_group);
 
+        tokio::spawn(async move {
             while let Some(message) = receiver.recv().await {
                 eprint!("\r\x1b[K");
                 eprintln!("{message}");
-                // eprintln!(
-                //     "{} {}: {}",
-                //     message.timestamp, message.display_name, message.content
-                // );
-                eprint!("{} > ", nick);
+
+                // Print the correct prompt with current group
+                let group = current_group.lock(); // parking_lot doesn't need unwrap
+                let prompt = match &*group {
+                    Some(g) => format!("\x1b[36m[{}]\x1b[0m {} > ", g, nick),
+                    None => format!("{} > ", nick),
+                };
+                eprint!("{}", prompt);
             }
-            debug!("Message display task ending.");
         })
     }
 

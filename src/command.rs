@@ -4,6 +4,14 @@ use clap::{Parser, Subcommand};
 
 use crate::crypto_identity_actor::{CryptoIdentityMessage, UserIdentity};
 
+// rustyline completer
+use rustyline::completion::{Completer, Pair};
+use rustyline::Context;
+use rustyline::hint::Hinter;
+use rustyline::highlight::Highlighter;
+use rustyline::validate::Validator;
+use rustyline::Helper;
+
 #[derive(Parser, Debug)]
 #[command(disable_help_flag = true)]
 #[command(name = "")]
@@ -37,7 +45,7 @@ pub enum Command {
         message: Vec<String>,
     },
     /// Create a new group
-    Create {
+    CreateGroup {
         /// New group name
         name: String,
     },
@@ -117,7 +125,7 @@ impl Command {
 impl Command {
     pub fn to_crypto_message(&self) -> Option<CryptoIdentityMessage> {
         match self {
-            Command::Create { name } => Some(CryptoIdentityMessage::CreateGroup {
+            Command::CreateGroup { name } => Some(CryptoIdentityMessage::CreateGroup {
                 group_name: name.clone(),
             }),
             Command::Invite { nick, .. } => nick
@@ -125,7 +133,7 @@ impl Command {
                 .ok()
                 .map(CryptoIdentityMessage::InviteUser),
             Command::Groups => Some(CryptoIdentityMessage::ListGroups),
-            Command::Group { name } => Some(CryptoIdentityMessage::SetActiveGroup(name.to_owned())),
+            Command::Group { name } => Some(CryptoIdentityMessage::SetCurrentGroup(name.to_owned())),
             Command::Users => Some(CryptoIdentityMessage::ListUsers),
             Command::Announce => Some(CryptoIdentityMessage::CreateAnnouncement),
             // Non-crypto commands return None
@@ -133,3 +141,88 @@ impl Command {
         }
     }
 }
+
+
+pub struct CommandCompleter;
+
+impl CommandCompleter {
+    /// Get all available command names
+    pub fn get_commands() -> Vec<&'static str> {
+        vec![
+            "invite",
+            "leave",
+            "msg",
+            "create-group",
+            "users",
+            "groups",
+            "group",
+            "safety",
+            "announce",
+            "quit",
+            "q",
+        ]
+    }
+}
+
+impl Completer for CommandCompleter {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        _pos: usize,
+        _ctx: &Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        if !line.starts_with('/') {
+            return Ok((0, vec![]));
+        }
+
+        let input = &line[1..];
+        let mut completions = Vec::new();
+
+        for cmd in Self::get_commands() {
+            if cmd.starts_with(input) {
+                completions.push(Pair {
+                    display: format!("/{}", cmd),
+                    replacement: format!("/{}", cmd),
+                });
+            }
+        }
+
+        Ok((0, completions))
+    }
+}
+
+impl Hinter for CommandCompleter {
+    type Hint = String;
+
+    fn hint(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> Option<String> {
+        // Only hint if we're at the end of the line
+        if pos < line.len() {
+            return None;
+        }
+
+        // Only hint for commands (lines starting with /)
+        if !line.starts_with('/') {
+            return None;
+        }
+
+        let input = &line[1..];
+        
+        // Find the first command that starts with the input
+        for cmd in Self::get_commands() {
+            if cmd.starts_with(input) && cmd.len() > input.len() {
+                // Return the remaining part of the command
+                return Some(cmd[input.len()..].to_string());
+            }
+        }
+
+        None
+    }
+}
+
+impl Highlighter for CommandCompleter {}
+
+impl Validator for CommandCompleter {}
+
+impl Helper for CommandCompleter {}

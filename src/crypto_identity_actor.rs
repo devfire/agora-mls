@@ -32,7 +32,7 @@ pub struct CryptoIdentityActor {
 
     // === MLS Group Management ===
     groups: HashMap<GroupId, MlsGroup>,
-    active_group: Option<GroupId>,
+    current_group: Option<GroupId>,
 
     // == User nick to KeyPackage mapping ===
     user_cache: HashMap<UserIdentity, KeyPackageIn>,
@@ -77,10 +77,10 @@ pub enum CryptoIdentityMessage {
     ListUsers,
 
     /// Get the active group name
-    GetActiveGroup,
+    GetCurrentGroup,
 
     /// Set the active group
-    SetActiveGroup(String),
+    SetCurrentGroup(String),
 
     /// Handle user invites
     InviteUser(UserIdentity),
@@ -100,46 +100,28 @@ pub enum CryptoIdentityMessage {
 
 #[derive(Reply)]
 pub enum CryptoIdentityReply {
-
-    // MlsIdentity {
-    //     mls_key_package: KeyPackageBundle,
-    //     credential_with_key: CredentialWithKey,
-    //     ciphersuite: Ciphersuite,
-    //     crypto_provider: Arc<OpenMlsRustCrypto>,
-    // },
-
-    // === MLS Operation Replies (NEW - Phase 2) ===
+    // === MLS Operation Replies ===
     /// Group created successfully
     GroupCreated(String),
 
     /// HPKE-encrypted GroupInfo for external commit join
     EncryptedGroupInfoForExternalInvite {
-        encrypted_group_info: AgoraPacket, // EncryptedGroupInfo wrapped in AgoraPacket
+        encrypted_group_info: AgoraPacket, // EncryptedGroupInfo wrapped in AgoraPacket, not MlsMessageOut
     },
     /// Message encrypted successfully
     MlsMessageOut(MlsMessageOut),
     /// Message processed successfully
-    MessageProcessed {
-        result: ProcessedMessageResult,
-    },
+    MessageProcessed { result: ProcessedMessageResult },
     /// Group joined successfully
-    GroupJoined {
-        group_name: String,
-    },
+    GroupJoined { group_name: String },
     /// List of groups returned in response to ListGroups command or /groups
-    Groups {
-        groups: Vec<String>,
-    },
+    Groups { groups: Vec<String> },
 
     /// List of known users returned in response to ListUsers command or /users
-    Users {
-        users: Vec<String>,
-    },
+    Users { users: Vec<String> },
 
-    /// Active group name
-    ActiveGroup {
-        group_name: Option<String>,
-    },
+    /// Current group name
+    CurrentGroup { group_name: Option<String> },
     /// A user announcement is a custom protocol message containing username and key package, not an MLS protocol message.
     /// Therefore, it wraps an AgoraPacket, not MlsMessageOut.
     /// This is used for announcing one's identity to others in response to the /announce command.
@@ -208,16 +190,16 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                         .collect(),
                 }
             }
-            CryptoIdentityMessage::GetActiveGroup => CryptoIdentityReply::ActiveGroup {
+            CryptoIdentityMessage::GetCurrentGroup => CryptoIdentityReply::CurrentGroup {
                 // get the active group name from the active group id
-                group_name: self.active_group.as_ref().and_then(|group_id| {
+                group_name: self.current_group.as_ref().and_then(|group_id| {
                     self.groups
                         .get(group_id)
                         .and_then(|group| Self::extract_group_name(group))
                 }),
             },
-            CryptoIdentityMessage::SetActiveGroup(group_name) => {
-                match self.set_active_group(&group_name) {
+            CryptoIdentityMessage::SetCurrentGroup(group_name) => {
+                match self.set_current_group(&group_name) {
                     Ok(reply) => reply,
                     Err(e) => CryptoIdentityReply::Failure(e),
                 }
@@ -265,7 +247,7 @@ impl CryptoIdentityActor {
     // MLS GROUP OPERATION HANDLERS
     // ========================================================================
 
-    fn set_active_group(&mut self, group_name: &str) -> Result<CryptoIdentityReply> {
+    fn set_current_group(&mut self, group_name: &str) -> Result<CryptoIdentityReply> {
         // first we need to convert group name to group_id
         let group_id = match self.group_name_to_id.get(group_name) {
             Some(gid) => gid,
@@ -274,7 +256,7 @@ impl CryptoIdentityActor {
             }
         };
         if self.groups.contains_key(group_id) {
-            self.active_group = Some(group_id.clone());
+            self.current_group = Some(group_id.clone());
             Ok(CryptoIdentityReply::Success)
         } else {
             Err(anyhow!("Group ID not found"))
@@ -283,6 +265,10 @@ impl CryptoIdentityActor {
 
     /// Create a new MLS group with the specified name
     fn handle_create_group(&mut self, group_name: String) -> Result<CryptoIdentityReply> {
+        // First check if the group already exists
+        if self.group_name_to_id.contains_key(&group_name) {
+            return Err(anyhow!("Group '{}' already exists", group_name));
+        }
         const GROUP_NAME_EXTENSION_ID: u16 = 13;
 
         // Create group name extension
@@ -319,7 +305,7 @@ impl CryptoIdentityActor {
 
         // Store the group and set as active
         self.groups.insert(group_id.clone(), group);
-        self.active_group = Some(group_id.clone());
+        self.current_group = Some(group_id.clone());
 
         // Store the group name for future reference when the user wants to switch groups by name
         self.group_name_to_id
@@ -353,7 +339,7 @@ impl CryptoIdentityActor {
         key_package: KeyPackage,
     ) -> Result<CryptoIdentityReply> {
         // Determine which group to use
-        let active_group_id = match &self.active_group {
+        let active_group_id = match &self.current_group {
             Some(id) => id,
             None => {
                 return Err(anyhow!("No active group found"));
@@ -463,7 +449,7 @@ impl CryptoIdentityActor {
     /// Encrypt a message for a group
     fn handle_encrypt_message(&mut self, plaintext: Vec<u8>) -> CryptoIdentityReply {
         // get the active group id from the active group
-        let group_id = match &self.active_group {
+        let group_id = match &self.current_group {
             Some(id) => id,
             None => {
                 return CryptoIdentityReply::Failure(anyhow!("No active group found"));
@@ -550,9 +536,7 @@ impl CryptoIdentityActor {
                 ProcessedMessageResult::StagedCommitMerged
             }
             _ => {
-                return CryptoIdentityReply::Failure(anyhow!(
-                    "Unsupported message content type"
-                ));
+                return CryptoIdentityReply::Failure(anyhow!("Unsupported message content type"));
             }
         };
 
@@ -605,7 +589,7 @@ impl CryptoIdentityActor {
 
         // Store the group and set as active
         self.groups.insert(group_id.clone(), group);
-        self.active_group = Some(group_id.clone());
+        self.current_group = Some(group_id.clone());
 
         Ok(CryptoIdentityReply::GroupJoined { group_name })
     }
@@ -759,7 +743,7 @@ impl CryptoIdentityActor {
         self.groups.insert(group_id.clone(), new_group_to_join);
 
         // Set the newly joined group as active (as you correctly identified)
-        self.active_group = Some(group_id);
+        self.current_group = Some(group_id);
         Ok(CryptoIdentityReply::MlsMessageOut(commit_message))
     }
 
@@ -893,7 +877,7 @@ impl CryptoIdentityActor {
             signature_keypair: Arc::new(signature_keypair),
             crypto_provider: provider,
             groups: HashMap::new(),
-            active_group: None,
+            current_group: None,
             user_cache: HashMap::new(),
             group_name_to_id: HashMap::new(),
         })
