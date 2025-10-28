@@ -432,10 +432,47 @@ impl Processor {
                                 encrypted_group_info,
                             )) => {
                                 // Received HPKE-encrypted GroupInfo for external commit join
+                                let sender_info = if !encrypted_group_info.sender_username.is_empty() {
+                                    format!(" from {}", encrypted_group_info.sender_username)
+                                } else {
+                                    String::new()
+                                };
+                                
+                                let total_size = encrypted_group_info.kem_output.len() + encrypted_group_info.ciphertext.len();
+                                
                                 debug!(
-                                    "Received EncryptedGroupInfo ({} bytes) for external commit",
-                                    encrypted_group_info.hpke_ciphertext.len()
+                                    "Received EncryptedGroupInfo ({} bytes) for external commit{}",
+                                    total_size,
+                                    sender_info
                                 );
+
+                                // Display who invited us and store their KeyPackage for future communication
+                                if !encrypted_group_info.sender_username.is_empty() {
+                                    if let Err(e) = display_sender
+                                        .send(format!(
+                                            "Received group invitation from {}",
+                                            encrypted_group_info.sender_username
+                                        ))
+                                        .await
+                                    {
+                                        error!("Unable to send invitation notification to display: {e}");
+                                    }
+                                    
+                                    // Store the sender's KeyPackage so we can message them back
+                                    if !encrypted_group_info.sender_key_package.is_empty() {
+                                        let sender_announcement = UserAnnouncement {
+                                            username: encrypted_group_info.sender_username.clone(),
+                                            tls_serialized_key_package: encrypted_group_info.sender_key_package.clone(),
+                                        };
+                                        
+                                        Self::handle_network_user_announcement(
+                                            &sender_announcement,
+                                            crypto_actor.clone(),
+                                            display_sender.clone(),
+                                        )
+                                        .await;
+                                    }
+                                }
 
                                 // Send this to crypto actor for decryption and external commit creation
                                 match crypto_actor

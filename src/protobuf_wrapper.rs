@@ -113,9 +113,12 @@ impl TryFrom<ProtoMlsMessageIn> for MlsMessageIn {
                     m.tls_serialized_key_package
                 }
                 agora_chat::agora_packet::Body::EncryptedGroupInfo(m) => {
-                    // EncryptedGroupInfo contains HPKE-encrypted GroupInfo
-                    // This should be handled specially by the recipient for decryption
-                    m.hpke_ciphertext
+                    // EncryptedGroupInfo contains HPKE-encrypted GroupInfo with separate KEM output and ciphertext
+                    // Concatenate them for MLS processing (KEM output + ciphertext)
+                    let mut combined = Vec::new();
+                    combined.extend_from_slice(&m.kem_output);
+                    combined.extend_from_slice(&m.ciphertext);
+                    combined
                 }
             },
             // If the `body` is `None`, the message is invalid.

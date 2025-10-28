@@ -82,12 +82,20 @@ pub struct EncryptedGroupInfo {
     /// This is sent in plaintext and used as the AAD for HPKE decryption.
     #[prost(bytes = "vec", tag = "1")]
     pub group_id: ::prost::alloc::vec::Vec<u8>,
-    /// The HPKE ciphertext containing the encrypted GroupInfo.
+    /// The KEM output from HPKE encryption.
     #[prost(bytes = "vec", tag = "2")]
-    pub hpke_ciphertext: ::prost::alloc::vec::Vec<u8>,
-    /// The length of the KEM output portion.
-    #[prost(uint32, tag = "3")]
-    pub kem_output_length: u32,
+    pub kem_output: ::prost::alloc::vec::Vec<u8>,
+    /// The HPKE ciphertext containing the encrypted GroupInfo.
+    #[prost(bytes = "vec", tag = "3")]
+    pub ciphertext: ::prost::alloc::vec::Vec<u8>,
+    /// The username of the sender who created this invitation.
+    /// This allows recipients to know who invited them before decrypting.
+    #[prost(string, tag = "4")]
+    pub sender_username: ::prost::alloc::string::String,
+    /// The sender's KeyPackage for return communication.
+    /// This allows the recipient to encrypt messages back to the sender.
+    #[prost(bytes = "vec", tag = "5")]
+    pub sender_key_package: ::prost::alloc::vec::Vec<u8>,
 }
 /// Represents the MLS protocol version in use.
 /// This should be kept in sync with the versions supported by your OpenMLS implementation.

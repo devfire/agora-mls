@@ -74,9 +74,17 @@ message EncryptedGroupInfo {
   // This is sent in plaintext and used as the AAD for HPKE decryption.
   bytes group_id = 1;
 
-  // The HPKE ciphertext containing the encrypted GroupInfo.
-  bytes hpke_ciphertext = 2;
+  // The KEM output from HPKE encryption.
+  bytes kem_output = 2;
 
-  // The length of the KEM output portion.
-  uint32 kem_output_length = 3;
+  // The HPKE ciphertext containing the encrypted GroupInfo.
+  bytes ciphertext = 3;
+
+  // The username of the sender who created this invitation.
+  // This allows recipients to know who invited them before decrypting.
+  string sender_username = 4;
+
+  // The sender's KeyPackage for return communication.
+  // This allows the recipient to encrypt messages back to the sender.
+  bytes sender_key_package = 5;
 }

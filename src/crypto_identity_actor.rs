@@ -1,3 +1,5 @@
+use crate::agora_chat;
+
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
 use anyhow::{Context, Result, anyhow};
@@ -393,27 +395,18 @@ impl CryptoIdentityActor {
             }
         };
 
-        // Package the HPKE ciphertext for transmission using the new EncryptedGroupInfo type
-        // Format: [KEM output][ciphertext] concatenated
-        let mut hpke_ciphertext_bytes = Vec::new();
-        hpke_ciphertext_bytes.extend_from_slice(hpke_ciphertext.kem_output.as_slice());
-        hpke_ciphertext_bytes.extend_from_slice(hpke_ciphertext.ciphertext.as_slice());
-
-        let kem_output_len = hpke_ciphertext.kem_output.as_slice().len() as u32;
-
-        // Create the EncryptedGroupInfo protobuf message
-        use crate::agora_chat;
+        // Create the EncryptedGroupInfo protobuf message with separate KEM output and ciphertext
         let encrypted_group_info_proto = agora_chat::EncryptedGroupInfo {
             group_id: active_group_ref.group_id().as_slice().to_vec(),
-            hpke_ciphertext: hpke_ciphertext_bytes.clone(),
-            kem_output_length: kem_output_len,
+            kem_output: hpke_ciphertext.kem_output.as_slice().to_vec(),
+            ciphertext: hpke_ciphertext.ciphertext.as_slice().to_vec(),
+            sender_username: self.username.clone(),
+            sender_key_package: self
+                .mls_key_package_bundle
+                .key_package()
+                .tls_serialize_detached()
+                .context("Failed to serialize sender's KeyPackage")?,
         };
-
-        debug!(
-            "Serialized GroupInfo ({} bytes) for external commit: {:?}",
-            group_info_bytes.len(),
-            encrypted_group_info_proto
-        );
 
         // Wrap in AgoraPacket
         let agora_packet = agora_chat::AgoraPacket {
@@ -422,14 +415,6 @@ impl CryptoIdentityActor {
                 encrypted_group_info_proto,
             )),
         };
-
-        debug!(
-            "Exported and HPKE-encrypted GroupInfo ({} bytes: {} bytes KEM output + {} bytes ciphertext) for external commit join to group: {:?}",
-            hpke_ciphertext_bytes.len(),
-            kem_output_len,
-            hpke_ciphertext.ciphertext.as_slice().len(),
-            active_group_ref.group_id()
-        );
 
         // Return the encrypted GroupInfo wrapped in AgoraPacket for transmission
         Ok(CryptoIdentityReply::EncryptedGroupInfoForExternalInvite {
@@ -598,33 +583,11 @@ impl CryptoIdentityActor {
         // The info string must also match the sender's.
         let info = b"GroupInfo HPKE Encryption for External Commit";
 
-        // Split the received ciphertext into its two parts using the provided length.
-        let kem_output_len = encrypted_group_info.kem_output_length as usize;
-
-        debug!(
-            "Decrypting GroupInfo: total ciphertext length = {}, KEM output length = {}",
-            encrypted_group_info.hpke_ciphertext.len(),
-            kem_output_len
-        );
-
-        let hpke_ciphertext_bytes = &encrypted_group_info.hpke_ciphertext;
-
-        if hpke_ciphertext_bytes.len() < kem_output_len {
-            return Err(anyhow!("Invalid HPKE ciphertext length"));
-        }
-        let (kem_output, ciphertext) = hpke_ciphertext_bytes.split_at(kem_output_len);
-
-        // Reconstruct the HpkeCiphertext struct for the crypto library.
+        // Reconstruct the HpkeCiphertext struct from the separate fields
         let hpke_ciphertext = HpkeCiphertext {
-            kem_output: kem_output.to_vec().into(),
-            ciphertext: ciphertext.to_vec().into(),
+            kem_output: encrypted_group_info.kem_output.clone().into(),
+            ciphertext: encrypted_group_info.ciphertext.clone().into(),
         };
-
-        debug!(
-            "Reconstructed HpkeCiphertext: KEM output = {:?}, ciphertext = {:?}",
-            hpke_ciphertext.kem_output.as_slice(),
-            hpke_ciphertext.ciphertext.as_slice()
-        );
 
         // Use openmls_rust_crypto's HPKE implementation via OpenMlsCryptoProvider trait
         let crypto = RustCrypto::default();
