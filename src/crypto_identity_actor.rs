@@ -524,6 +524,16 @@ impl CryptoIdentityActor {
                     }
                 }
             }
+            // We are merging staged commits because the MLS protocol uses a two-phase commit process:
+            // when another group member sends a commit message (e.g., to add/remove members or update keys),
+            // the client first validates and "stages" the commit to ensure it's cryptographically valid and authorized,
+            // then explicitly "merges" it into our local group state to apply the changes.
+            //
+            // This merge operation updates the group's epoch, ratchet tree, and encryption keys to stay synchronized with other members.
+            // If we skip the merge, the local state becomes stale and we won't be able to decrypt future messages from the group.
+            //
+            // IN THEORY!! the staged commit pattern gives us a chance to inspect changes before committing to them,
+            // though in our implementation we merge immediately after successful staging since we trust the network's MLS validation.
             ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
                 // Merge the staged commit
                 if let Err(e) =

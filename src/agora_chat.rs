@@ -10,7 +10,7 @@ pub struct AgoraPacket {
     /// The body of the message, corresponding to the MlsMessageBodyOut enum.
     /// The 'oneof' constraint ensures that a message can only be one of these types at a time,
     /// perfectly mapping the behavior of the Rust enum.
-    #[prost(oneof = "agora_packet::Body", tags = "2, 3, 4, 5, 7, 8")]
+    #[prost(oneof = "agora_packet::Body", tags = "2, 3, 4, 6, 7")]
     pub body: ::core::option::Option<agora_packet::Body>,
 }
 /// Nested message and enum types in `AgoraPacket`.
@@ -25,12 +25,10 @@ pub mod agora_packet {
         #[prost(message, tag = "3")]
         PrivateMessage(super::PrivateMessage),
         #[prost(message, tag = "4")]
-        Welcome(super::Welcome),
-        #[prost(message, tag = "5")]
         GroupInfo(super::GroupInfo),
-        #[prost(message, tag = "7")]
+        #[prost(message, tag = "6")]
         UserAnnouncement(super::UserAnnouncement),
-        #[prost(message, tag = "8")]
+        #[prost(message, tag = "7")]
         EncryptedGroupInfo(super::EncryptedGroupInfo),
     }
 }

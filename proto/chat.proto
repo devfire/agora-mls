@@ -16,10 +16,9 @@ message AgoraPacket {
   oneof body {
     PublicMessage public_message = 2;
     PrivateMessage private_message = 3;
-    Welcome welcome = 4;
-    GroupInfo group_info = 5;
-    UserAnnouncement user_announcement = 7;
-    EncryptedGroupInfo encrypted_group_info = 8;
+    GroupInfo group_info = 4;
+    UserAnnouncement user_announcement = 6;
+    EncryptedGroupInfo encrypted_group_info = 7;
   }
 }
 
