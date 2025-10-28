@@ -65,11 +65,6 @@ pub enum CryptoIdentityMessage {
         mls_message_in: MlsMessageIn,
     },
 
-    /// Join a group via Welcome message
-    JoinGroup {
-        welcome: Welcome,
-    },
-
     /// List all groups
     ListGroups,
 
@@ -173,10 +168,6 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
             CryptoIdentityMessage::ProcessMessage { mls_message_in } => {
                 self.handle_mls_message(mls_message_in)
             }
-            CryptoIdentityMessage::JoinGroup { welcome } => match self.handle_join_group(welcome) {
-                Ok(reply) => reply,
-                Err(e) => CryptoIdentityReply::Failure(e),
-            },
             CryptoIdentityMessage::ListGroups =>
             // 1. Get list of group IDs
             // 2. Fetch the corresponding MlsGroup references from the HashMap
@@ -551,57 +542,6 @@ impl CryptoIdentityActor {
         };
 
         CryptoIdentityReply::MessageProcessed { result }
-    }
-
-    /// Join a group via Welcome message
-    fn handle_join_group(&mut self, welcome: Welcome) -> Result<CryptoIdentityReply> {
-        // Create join configuration
-        let mls_group_join_config = MlsGroupJoinConfig::default();
-
-        // Stage the Welcome message
-        let staged_welcome = match StagedWelcome::new_from_welcome(
-            self.crypto_provider.as_ref(),
-            &mls_group_join_config,
-            welcome,
-            None, // ratchet_tree typically not needed
-        ) {
-            Ok(sw) => sw,
-            Err(e) => {
-                return Ok(CryptoIdentityReply::Failure(anyhow!(
-                    "Failed to stage Welcome message: {}",
-                    e
-                )));
-            }
-        };
-
-        // Convert to MlsGroup (uses stored keys from crypto_provider)
-        let group = match staged_welcome.into_group(self.crypto_provider.as_ref()) {
-            Ok(g) => g,
-            Err(e) => {
-                return Ok(CryptoIdentityReply::Failure(anyhow!(
-                    "Failed to join group: {}",
-                    e
-                )));
-            }
-        };
-
-        // Extract group name from extensions, we only need it for the return confirmation
-        let group_name = match Self::extract_group_name(&group) {
-            Some(name) => name,
-            None => {
-                return Ok(CryptoIdentityReply::Failure(anyhow!(
-                    "Failed to extract group name."
-                )));
-            }
-        };
-
-        let group_id = group.group_id().clone();
-
-        // Store the group and set as active
-        self.groups.insert(group_id.clone(), group);
-        self.current_group = Some(group_id.clone());
-
-        Ok(CryptoIdentityReply::GroupJoined { group_name })
     }
 
     /// Handle the new user invite request
