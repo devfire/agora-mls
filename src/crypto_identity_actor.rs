@@ -34,7 +34,7 @@ pub struct CryptoIdentityActor {
 
     // === MLS Group Management ===
     groups: HashMap<GroupId, MlsGroup>,
-    current_group: Option<GroupId>,
+    // current_group: Option<GroupId>,
 
     // == User nick to KeyPackage mapping ===
     user_cache: HashMap<UserIdentity, KeyPackageIn>,
@@ -59,12 +59,16 @@ pub enum CryptoIdentityMessage {
     },
 
     /// Add a member to the current active group
-    AddMemberToGroup {
+    InviteMemberToGroup {
         key_package: KeyPackage,
+        group_name: String,
     },
 
     /// Encrypt a message for the current active group
-    EncryptMessage(Vec<u8>),
+    EncryptMessage {
+        plaintext: Vec<u8>,
+        group_name: String,
+    },
 
     /// Process an incoming MLS message
     ProcessMessage {
@@ -77,14 +81,11 @@ pub enum CryptoIdentityMessage {
     /// List all users in cache
     ListUsers,
 
-    /// Get the active group name
-    GetCurrentGroup,
-
-    /// Set the active group
-    SetCurrentGroup(String),
-
     /// Handle user invites
-    InviteUser(UserIdentity),
+    InviteUser {
+        user_identity: UserIdentity,
+        group_name: String,
+    },
 
     CreateAnnouncement, // --> returns CryptoIdentityReply::UserAnnouncement(UserIdentity)
 
@@ -121,8 +122,6 @@ pub enum CryptoIdentityReply {
     /// List of known users returned in response to ListUsers command or /users
     Users { users: Vec<String> },
 
-    /// Current group name
-    CurrentGroup { group_name: Option<String> },
     /// A user announcement is a custom protocol message containing username and key package, not an MLS protocol message.
     /// Therefore, it wraps an AgoraPacket, not MlsMessageOut.
     /// This is used for announcing one's identity to others in response to the /announce command.
@@ -162,15 +161,17 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                     Err(e) => CryptoIdentityReply::Failure(e),
                 }
             }
-            CryptoIdentityMessage::AddMemberToGroup { key_package } => {
-                match self.handle_add_new_member_to_group(key_package) {
-                    Ok(reply) => reply,
-                    Err(e) => CryptoIdentityReply::Failure(e),
-                }
-            }
-            CryptoIdentityMessage::EncryptMessage(plaintext) => {
-                self.handle_encrypt_message(plaintext)
-            }
+            CryptoIdentityMessage::InviteMemberToGroup {
+                key_package,
+                group_name,
+            } => match self.handle_invite_new_member_to_group(key_package, &group_name) {
+                Ok(reply) => reply,
+                Err(e) => CryptoIdentityReply::Failure(e),
+            },
+            CryptoIdentityMessage::EncryptMessage {
+                plaintext,
+                group_name,
+            } => self.handle_encrypt_message(plaintext, &group_name),
             CryptoIdentityMessage::ProcessMessage { mls_message_in } => {
                 self.handle_mls_message(mls_message_in)
             }
@@ -187,26 +188,13 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                         .collect(),
                 }
             }
-            CryptoIdentityMessage::GetCurrentGroup => CryptoIdentityReply::CurrentGroup {
-                // get the active group name from the active group id
-                group_name: self.current_group.as_ref().and_then(|group_id| {
-                    self.groups
-                        .get(group_id)
-                        .and_then(|group| Self::extract_group_name(group))
-                }),
+            CryptoIdentityMessage::InviteUser {
+                user_identity,
+                group_name,
+            } => match self.handle_invite_user(user_identity, &group_name) {
+                Ok(reply) => reply,
+                Err(e) => CryptoIdentityReply::Failure(e),
             },
-            CryptoIdentityMessage::SetCurrentGroup(group_name) => {
-                match self.set_current_group(&group_name) {
-                    Ok(reply) => reply,
-                    Err(e) => CryptoIdentityReply::Failure(e),
-                }
-            }
-            CryptoIdentityMessage::InviteUser(user_identity) => {
-                match self.handle_invite_user(user_identity) {
-                    Ok(reply) => reply,
-                    Err(e) => CryptoIdentityReply::Failure(e),
-                }
-            }
             CryptoIdentityMessage::CreateAnnouncement => match self.create_user_announcement() {
                 Ok(reply) => reply,
                 Err(e) => CryptoIdentityReply::Failure(e),
@@ -243,23 +231,6 @@ impl CryptoIdentityActor {
     // ========================================================================
     // MLS GROUP OPERATION HANDLERS
     // ========================================================================
-
-    fn set_current_group(&mut self, group_name: &str) -> Result<CryptoIdentityReply> {
-        // first we need to convert group name to group_id
-        let group_id = match self.group_name_to_id.get(group_name) {
-            Some(gid) => gid,
-            None => {
-                return Err(anyhow!("Unknown group {group_name}"));
-            }
-        };
-        if self.groups.contains_key(group_id) {
-            self.current_group = Some(group_id.clone());
-            Ok(CryptoIdentityReply::Success)
-        } else {
-            Err(anyhow!("Group ID not found"))
-        }
-    }
-
     /// Create a new MLS group with the specified name
     fn handle_create_group(&mut self, group_name: String) -> Result<CryptoIdentityReply> {
         // First check if the group already exists
@@ -302,7 +273,6 @@ impl CryptoIdentityActor {
 
         // Store the group and set as active
         self.groups.insert(group_id.clone(), group);
-        self.current_group = Some(group_id.clone());
 
         // Store the group name for future reference when the user wants to switch groups by name
         self.group_name_to_id
@@ -331,12 +301,13 @@ impl CryptoIdentityActor {
     /// 4. Send encrypted ciphertext to recipient
     /// 5. Recipient decrypts with their HPKE private key
     /// 6. Recipient uses GroupInfo to create external commit
-    fn handle_add_new_member_to_group(
+    fn handle_invite_new_member_to_group(
         &mut self,
         key_package: KeyPackage,
+        group_name: &str,
     ) -> Result<CryptoIdentityReply> {
         // Determine which group to use
-        let active_group_id = match &self.current_group {
+        let target_group_id = match self.group_name_to_id.get(group_name) {
             Some(id) => id,
             None => {
                 return Err(anyhow!("No active group found"));
@@ -344,7 +315,7 @@ impl CryptoIdentityActor {
         };
 
         // Get the group
-        let active_group_ref = match self.groups.get(&active_group_id) {
+        let target_group_ref = match self.groups.get(&target_group_id) {
             Some(g) => g,
             None => {
                 return Err(anyhow!("No active group found"));
@@ -352,7 +323,7 @@ impl CryptoIdentityActor {
         };
 
         // Export the GroupInfo for the external joiner
-        let group_info_out = active_group_ref
+        let group_info_out = target_group_ref
             .export_group_info(
                 &RustCrypto::default(),
                 &*self.signature_keypair,
@@ -372,13 +343,13 @@ impl CryptoIdentityActor {
         let recipient_hpke_key = key_package.hpke_init_key();
 
         // Get the ciphersuite from the group for HPKE configuration
-        let ciphersuite = active_group_ref.ciphersuite();
+        let ciphersuite = target_group_ref.ciphersuite();
 
         // Encrypt the GroupInfo using HPKE with the recipient's public key
         // info: context string for HPKE
         // aad: additional authenticated data (group ID)
         let info = b"GroupInfo HPKE Encryption for External Commit";
-        let aad = active_group_ref.group_id().as_slice();
+        let aad = target_group_ref.group_id().as_slice();
 
         // Use openmls_rust_crypto's HPKE implementation via OpenMlsCryptoProvider trait
         let crypto = RustCrypto::default();
@@ -401,7 +372,7 @@ impl CryptoIdentityActor {
 
         // Create the EncryptedGroupInfo protobuf message with separate KEM output and ciphertext
         let encrypted_group_info_proto = agora_chat::EncryptedGroupInfo {
-            group_id: active_group_ref.group_id().as_slice().to_vec(),
+            group_id: target_group_ref.group_id().as_slice().to_vec(),
             kem_output: hpke_ciphertext.kem_output.as_slice().to_vec(),
             ciphertext: hpke_ciphertext.ciphertext.as_slice().to_vec(),
             sender_username: self.username.clone(),
@@ -427,12 +398,16 @@ impl CryptoIdentityActor {
     }
 
     /// Encrypt a message for a group
-    fn handle_encrypt_message(&mut self, plaintext: Vec<u8>) -> CryptoIdentityReply {
-        // get the active group id from the active group
-        let group_id = match &self.current_group {
+    fn handle_encrypt_message(
+        &mut self,
+        plaintext: Vec<u8>,
+        group_name: &str,
+    ) -> CryptoIdentityReply {
+        // get the target group id from the groups map
+        let group_id = match self.group_name_to_id.get(group_name) {
             Some(id) => id,
             None => {
-                return CryptoIdentityReply::Failure(anyhow!("No active group found"));
+                return CryptoIdentityReply::Failure(anyhow!("Current group not found"));
             }
         };
         // Get the group
@@ -534,7 +509,11 @@ impl CryptoIdentityActor {
     }
 
     /// Handle the new user invite request
-    fn handle_invite_user(&mut self, user_identity: UserIdentity) -> Result<CryptoIdentityReply> {
+    fn handle_invite_user(
+        &mut self,
+        user_identity: UserIdentity,
+        group_name: &str,
+    ) -> Result<CryptoIdentityReply> {
         // Check if we have the user in our cache
         let key_package_in = match self.user_cache.get(&user_identity) {
             Some(kp) => kp.clone(),
@@ -556,8 +535,8 @@ impl CryptoIdentityActor {
                 }
             };
 
-        // Add the member to the active group
-        Ok(self.handle_add_new_member_to_group(validated_keypackage)?)
+        // Invite the member to the active group
+        Ok(self.handle_invite_new_member_to_group(validated_keypackage, group_name)?)
     }
 
     /// Process a received HPKE-encrypted GroupInfo to initiate an external join.
@@ -659,8 +638,6 @@ impl CryptoIdentityActor {
         let group_id = new_group_to_join.group_id().clone();
         self.groups.insert(group_id.clone(), new_group_to_join);
 
-        // Set the newly joined group as active (as you correctly identified)
-        self.current_group = Some(group_id);
         Ok(CryptoIdentityReply::MlsMessageOut(commit_message))
     }
 
@@ -794,7 +771,6 @@ impl CryptoIdentityActor {
             signature_keypair: Arc::new(signature_keypair),
             crypto_provider: provider,
             groups: HashMap::new(),
-            current_group: None,
             user_cache: HashMap::new(),
             group_name_to_id: HashMap::new(),
         })

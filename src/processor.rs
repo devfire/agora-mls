@@ -189,15 +189,37 @@ impl Processor {
         message_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         let network_manager = self.network_manager.clone();
+        let current_group = Arc::clone(&self.current_group);
         tokio::spawn(async move {
             debug!("Starting message handler task.");
 
             while let Some(message) = receiver.recv().await {
                 debug!("Message handler received: {:?}", message);
 
+                // NOTE: We must extract the value and drop the lock BEFORE any .await points
+                // to ensure the future is Send-safe. parking_lot::Mutex guards are not Send.
+                let group_name = {
+                    let group = current_group.lock();
+                    (*group).clone() // Clone the Option<String>
+                }; // Lock is dropped here
+
+                // Check if we have a group outside the lock scope
+                let group_name = if let Some(name) = group_name {
+                    name
+                } else {
+                    let err_msg = "No active group selected. Use /group <group_name> to select a group before sending messages.";
+
+                    if let Err(e) = message_sender.send(err_msg.to_string()).await {
+                        error!("Unable to send an update from spawn_ui_input_handler_task {e}.");
+                    }
+                    continue;
+                };
                 // Send to the state actor for encryption and multicast
                 match crypto_actor
-                    .ask(CryptoIdentityMessage::EncryptMessage(message.into()))
+                    .ask(CryptoIdentityMessage::EncryptMessage {
+                        plaintext: message.into(),
+                        group_name: group_name.clone(),
+                    })
                     .await
                 {
                     Ok(reply) => {
@@ -339,15 +361,6 @@ impl Processor {
                                 let group_list = groups.join(", ");
                                 display_sender
                                     .send(format!("Known groups: {group_list}"))
-                                    .await
-                                    .expect("Unable to send the decrypted msg to display");
-                            }
-                            CryptoIdentityReply::CurrentGroup { group_name } => {
-                                let active_group_name =
-                                    group_name.unwrap_or("No active group".to_string());
-
-                                display_sender
-                                    .send(format!("Current active group: {active_group_name} "))
                                     .await
                                     .expect("Unable to send the decrypted msg to display");
                             }

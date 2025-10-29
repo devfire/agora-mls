@@ -27,14 +27,14 @@ pub enum Command {
         /// Username name to invite
         #[arg(help = "Name of the user to invite")]
         nick: String,
-        /// Optional password
-        #[arg(help = "Channel password (if required)")]
-        password: Option<String>,
+        /// Group to invite the user to
+        #[arg(help = "Group to invite the user to")]
+        group_name: String,
     },
     /// Leave current or specified channel
     Leave {
-        /// Channel to leave (defaults to current)
-        channel: Option<String>,
+        /// Channel to leave
+        channel: String,
     },
     /// Send a private message
     Msg {
@@ -55,9 +55,9 @@ pub enum Command {
     /// List available groups
     Groups,
 
-    /// Display information about current active group or set active group
+    /// Switch to a different group
     Group {
-        /// Set group to active
+        /// Group name to switch to
         name: String,
     },
 
@@ -102,7 +102,6 @@ impl Command {
     pub fn show_custom_help() {
         println!("╭─ Chat Commands ─────────────────────────────────────────╮");
         println!("│                                                         │");
-        println!("│  /join <channel> [password]     Join a channel          │");
         println!("│  /leave [channel]               Leave channel           │");
         println!("│  /msg <user> <message>          Send private message    │");
         println!("│  /nick <nickname>               Change your nickname    │");
@@ -112,8 +111,6 @@ impl Command {
         println!("│  /quit, /q                      Exit the chat           │");
         println!("│                                                         │");
         println!("│  Examples:                                              │");
-        println!("│    /join #general                                       │");
-        println!("│    /join #private secret123                             │");
         println!("│    /msg alice Hey there!                                │");
         println!("│    /nick CoolUser                                       │");
         println!("│                                                         │");
@@ -128,12 +125,14 @@ impl Command {
             Command::CreateGroup { name } => Some(CryptoIdentityMessage::CreateGroup {
                 group_name: name.clone(),
             }),
-            Command::Invite { nick, .. } => nick
+            Command::Invite { nick, group_name: group } => nick
                 .parse::<UserIdentity>()
                 .ok()
-                .map(CryptoIdentityMessage::InviteUser),
+                .map(|user_identity| CryptoIdentityMessage::InviteUser {
+                    user_identity,
+                    group_name: group.clone(),
+                }),
             Command::Groups => Some(CryptoIdentityMessage::ListGroups),
-            Command::Group { name } => Some(CryptoIdentityMessage::SetCurrentGroup(name.to_owned())),
             Command::Users => Some(CryptoIdentityMessage::ListUsers),
             Command::Announce => Some(CryptoIdentityMessage::CreateAnnouncement),
             // Non-crypto commands return None
