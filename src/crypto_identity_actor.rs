@@ -164,7 +164,7 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
             CryptoIdentityMessage::InviteMemberToGroup {
                 key_package,
                 group_name,
-            } => match self.handle_invite_new_member_to_group(key_package, &group_name) {
+            } => match self.invite_new_member_to_group(key_package, &group_name) {
                 Ok(reply) => reply,
                 Err(e) => CryptoIdentityReply::Failure(e),
             },
@@ -301,7 +301,7 @@ impl CryptoIdentityActor {
     /// 4. Send encrypted ciphertext to recipient
     /// 5. Recipient decrypts with their HPKE private key
     /// 6. Recipient uses GroupInfo to create external commit
-    fn handle_invite_new_member_to_group(
+    fn invite_new_member_to_group(
         &mut self,
         key_package: KeyPackage,
         group_name: &str,
@@ -332,12 +332,12 @@ impl CryptoIdentityActor {
             .context("Failed to export GroupInfo")?;
 
         // Serialize GroupInfo to bytes for encryption
-        let group_info_bytes = match group_info_out.tls_serialize_detached() {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                return Err(anyhow!("Failed to serialize GroupInfo: {e}"));
-            }
-        };
+        // let group_info_bytes = match group_info_out.tls_serialize_detached() {
+        //     Ok(bytes) => bytes,
+        //     Err(e) => {
+        //         return Err(anyhow!("Failed to serialize GroupInfo: {e}"));
+        //     }
+        // };
 
         // Extract the HPKE public key from the recipient's KeyPackage
         let recipient_hpke_key = key_package.hpke_init_key();
@@ -347,9 +347,25 @@ impl CryptoIdentityActor {
 
         // Encrypt the GroupInfo using HPKE with the recipient's public key
         // info: context string for HPKE
-        // aad: additional authenticated data (group ID)
+        // aad: additional authenticated data (can be empty or include metadata in our case just the app name)
         let info = b"GroupInfo HPKE Encryption for External Commit";
-        let aad = target_group_ref.group_id().as_slice();
+        let aad = "agora-mls".as_bytes();
+
+        let group_info_bytes = match group_info_out.tls_serialize_detached() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return Err(anyhow!("Failed to serialize GroupInfo: {e}"));
+            }
+        };
+
+        let confidential_payload = (
+            group_info_bytes, // We put the raw bytes in
+            target_group_ref.group_id().clone(),
+        );
+
+        let confidential_bytes_final = confidential_payload
+            .tls_serialize_detached()
+            .context("Failed to serialize confidential payload tuple")?;
 
         // Use openmls_rust_crypto's HPKE implementation via OpenMlsCryptoProvider trait
         let crypto = RustCrypto::default();
@@ -362,7 +378,7 @@ impl CryptoIdentityActor {
             recipient_pk_bytes,
             info,
             aad,
-            &group_info_bytes,
+            &confidential_bytes_final,
         ) {
             Ok(ct) => ct,
             Err(e) => {
@@ -372,7 +388,6 @@ impl CryptoIdentityActor {
 
         // Create the EncryptedGroupInfo protobuf message with separate KEM output and ciphertext
         let encrypted_group_info_proto = agora_chat::EncryptedGroupInfo {
-            group_id: target_group_ref.group_id().as_slice().to_vec(),
             kem_output: hpke_ciphertext.kem_output.as_slice().to_vec(),
             ciphertext: hpke_ciphertext.ciphertext.as_slice().to_vec(),
             sender_username: self.username.clone(),
@@ -536,7 +551,7 @@ impl CryptoIdentityActor {
             };
 
         // Invite the member to the active group
-        Ok(self.handle_invite_new_member_to_group(validated_keypackage, group_name)?)
+        Ok(self.invite_new_member_to_group(validated_keypackage, group_name)?)
     }
 
     /// Process a received HPKE-encrypted GroupInfo to initiate an external join.
@@ -555,13 +570,8 @@ impl CryptoIdentityActor {
         // 1. DECRYPT THE PAYLOAD
         // ======================
 
-        // AAD must match what the sender used. We get it from the plaintext part of the message.
-        let aad = &encrypted_group_info.group_id;
-
-        debug!(
-            "Received EncryptedGroupInfo for external commit join to group ID: {:?}",
-            GroupId::from_slice(&encrypted_group_info.group_id)
-        );
+        // AAD must match what the sender used.
+        let aad = "agora-mls".as_bytes();
 
         // The info string must also match the sender's.
         let info = b"GroupInfo HPKE Encryption for External Commit";
@@ -576,7 +586,7 @@ impl CryptoIdentityActor {
         let crypto = RustCrypto::default();
 
         // Decrypt using our OWN HPKE private key from our KeyPackageBundle.
-        let group_info_bytes = crypto
+        let confidential_bytes = crypto
             .hpke_open(
                 self.ciphersuite.hpke_config(),
                 &hpke_ciphertext,
@@ -587,14 +597,23 @@ impl CryptoIdentityActor {
             .context("Failed to HPKE decrypt GroupInfo")?;
 
         // ============================
-        // 2. DESERIALIZE THE GroupInfo
+        // 2. DESERIALIZE THE GroupInfo + GroupId TUPLE
         // ============================
-        // Deserialize as MlsMessageIn and extract GroupInfo
-        // First, deserialize the GroupInfoOut struct that the sender serialized
-        let deserialized_mls_message_in = MlsMessageIn::tls_deserialize(&mut &group_info_bytes[..])
-            .context("Failed to deserialize MlsMessageIn")?;
+        // This works because:
+        // TlsDeserialize is a generic trait that tls_codec (the library OpenMLS uses) provides.
+        //
+        // tls_codec provides an implementation of this trait for tuples (T, U) as long as T and U also implement TlsDeserialize.
+        // Both VerifiableGroupInfo and GroupId implement TlsDeserialize.
+        // By providing the explicit type hint (VerifiableGroupInfo, GroupId), we are telling the Rust compiler which implementation of TlsDeserialize::tls_deserialize to use.
+        // The compiler sees (T, U) and correctly invokes the deserializer for the tuple.
 
-        // Extract the GroupInfo from the MlsMessageIn
+        let (group_info_bytes, group_id): (Vec<u8>, GroupId) =
+            Deserialize::tls_deserialize(&mut &confidential_bytes[..])
+                .context("Failed to deserialize confidential payload tuple")?;
+
+        let deserialized_mls_message_in = MlsMessageIn::tls_deserialize(&mut &group_info_bytes[..])
+            .context("Failed to deserialize MlsMessageIn from decrypted payload")?;
+
         let verifiable_group_info = match deserialized_mls_message_in.extract() {
             MlsMessageBodyIn::GroupInfo(group_info) => group_info,
             _ => {
@@ -604,8 +623,8 @@ impl CryptoIdentityActor {
             }
         };
 
-        let (new_group_to_join, commit_message_bundle) = MlsGroup::external_commit_builder()
-            .with_aad(aad.to_vec())
+        let (mut new_group_to_join, commit_message_bundle) = MlsGroup::external_commit_builder()
+            .with_aad(group_id.to_vec())
             .build_group(
                 self.crypto_provider.as_ref(),
                 verifiable_group_info,
@@ -629,14 +648,22 @@ impl CryptoIdentityActor {
 
         // Merge the pending commit to finalize our addition to the group
         // This applies the external commit to our local group state
-        let mut new_group_to_join = new_group_to_join;
         new_group_to_join
             .merge_pending_commit(self.crypto_provider.as_ref())
             .context("Failed to self merge pending external commit")?;
 
+        // Extract group name
+        let group_name = match Self::extract_group_name(&new_group_to_join) {
+            Some(name) => name,
+            None => "Unnamed Group".to_string(), // I think we should fail here instead
+        };
+
         // =============================
         let group_id = new_group_to_join.group_id().clone();
         self.groups.insert(group_id.clone(), new_group_to_join);
+
+        // Add the group name to self.group_name_to_id
+        self.group_name_to_id.insert(group_name.clone(), group_id);
 
         Ok(CryptoIdentityReply::MlsMessageOut(commit_message))
     }

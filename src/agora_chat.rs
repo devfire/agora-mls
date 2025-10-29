@@ -78,23 +78,19 @@ pub struct UserAnnouncement {
 /// key and then use the GroupInfo to create an external commit.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct EncryptedGroupInfo {
-    /// The unique ID of the group this invite is for.
-    /// This is sent in plaintext and used as the AAD for HPKE decryption.
-    #[prost(bytes = "vec", tag = "1")]
-    pub group_id: ::prost::alloc::vec::Vec<u8>,
     /// The KEM output from HPKE encryption.
-    #[prost(bytes = "vec", tag = "2")]
+    #[prost(bytes = "vec", tag = "1")]
     pub kem_output: ::prost::alloc::vec::Vec<u8>,
     /// The HPKE ciphertext containing the encrypted GroupInfo.
-    #[prost(bytes = "vec", tag = "3")]
+    #[prost(bytes = "vec", tag = "2")]
     pub ciphertext: ::prost::alloc::vec::Vec<u8>,
     /// The username of the sender who created this invitation.
     /// This allows recipients to know who invited them before decrypting.
-    #[prost(string, tag = "4")]
+    #[prost(string, tag = "3")]
     pub sender_username: ::prost::alloc::string::String,
     /// The sender's KeyPackage for return communication.
     /// This allows the recipient to encrypt messages back to the sender.
-    #[prost(bytes = "vec", tag = "5")]
+    #[prost(bytes = "vec", tag = "4")]
     pub sender_key_package: ::prost::alloc::vec::Vec<u8>,
 }
 /// Represents the MLS protocol version in use.
