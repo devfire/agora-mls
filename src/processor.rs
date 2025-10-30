@@ -227,9 +227,14 @@ impl Processor {
                     .await
                 {
                     Ok(reply) => {
-                        Self::handle_crypto_identity_reply(reply, display_sender, network_manager)
-                            .await
-                            .expect("Failed to handle crypto identity reply");
+                        Self::handle_crypto_identity_reply(
+                            reply,
+                            &display_sender,
+                            &network_manager,
+                            &current_group,
+                        )
+                        .await
+                        .expect("Failed to handle crypto identity reply");
                     }
                     Err(e) => {
                         error!(
@@ -279,101 +284,16 @@ impl Processor {
                 if let Some(c) = command.to_crypto_message() {
                     // Forward the command to the state actor and await the reply
                     match crypto_actor.ask(c).await {
-                        Ok(reply) => match reply {
-                            CryptoIdentityReply::GroupCreated(group_name) => {}
-                            CryptoIdentityReply::EncryptedGroupInfoForExternalInvite {
-                                encrypted_group_info,
-                            } => {}
-                            CryptoIdentityReply::MlsMessageOut(mls_message_out) => {}
-                            CryptoIdentityReply::MessageProcessed { result } => match result {
-                                ProcessedMessageResult::ApplicationMessage(msg) => {
-                                    // Application message already decrypted
-                                    if let Err(e) = display_sender.send(msg).await {
-                                        error!("Unable to send decrypted message to display: {e}");
-                                    }
-                                }
-                                _ => {
-                                    // Regular proposal received and queued
-                                    error!("Unexpected message in command handler task");
-                                }
-                            },
-                            CryptoIdentityReply::GroupJoined { group_name } => {}
-                            CryptoIdentityReply::Groups { groups } => {
-                                let group_list = groups.join(", ");
-                                display_sender
-                                    .send(format!("Known groups: {group_list}"))
-                                    .await
-                                    .expect("Unable to send the decrypted msg to display");
-                            }
-                            CryptoIdentityReply::Success => {
-                                display_sender
-                                    .send("Command executed successfully.".to_string())
-                                    .await
-                                    .expect("Unable to send the decrypted msg to display");
-                            }
-                            CryptoIdentityReply::Failure(error) => {
-                                if let Err(e) = display_sender
-                                    .send(format!("Command failed: {error}"))
-                                    .await
-                                {
-                                    error!("Unable to send error message: {e}");
-                                }
-                            }
-                            CryptoIdentityReply::UserAnnouncement(announcement) => {
-                                if let Err(e) = network_manager
-                                    .send_message(crate::protobuf_wrapper::ProtoMlsMessageOut(
-                                        announcement,
-                                    ))
-                                    .await
-                                {
-                                    error!("Failed to send User announcement over network: {}", e);
-                                } else {
-                                    if let Err(e) = display_sender
-                                        .send(format!("User announcement sent successfully"))
-                                        .await
-                                    {
-                                        error!("Unable to send error message: {e}");
-                                    }
-                                }
-                            }
-                            CryptoIdentityReply::Users { users } => {
-                                let user_list = users.join(", ");
-                                if let Err(e) = display_sender
-                                    .send(format!("Known users: {user_list}"))
-                                    .await
-                                {
-                                    error!("Unable to send the list of users to display: {e}");
-                                }
-                            }
-                            CryptoIdentityReply::ExternalCommitCreated {
-                                commit_message,
-                                group_name,
-                            } => {
-                                let msg = if let Ok(msg) = commit_message.try_into() {
-                                    msg
-                                } else {
-                                    error!("Received invalid MlsMessageOut packet");
-                                    continue;
-                                };
-
-                                if let Err(e) = network_manager.send_message(msg).await {
-                                    error!("Failed to send message over network: {}", e);
-                                }
-
-                                // update the current group
-                                // NOTE: The curly braces are important to limit the scope of the lock
-                                {
-                                    let mut group = current_group.lock();
-                                    *group = Some(group_name);
-                                }
-                                if let Err(e) = display_sender
-                                    .send("Sent external commit to group members.".to_string())
-                                    .await
-                                {
-                                    error!("Unable to send a message to display: {e}");
-                                }
-                            }
-                        },
+                        Ok(reply) => {
+                            Self::handle_crypto_identity_reply(
+                                reply,
+                                &display_sender,
+                                &network_manager,
+                                &current_group,
+                            )
+                            .await
+                            .expect("Failed to handle crypto identity reply in command handler");
+                        }
                         Err(e) => {
                             error!("Failed to send command to state actor: {}", e);
                             break;
@@ -391,6 +311,8 @@ impl Processor {
         display_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         let network_manager = Arc::clone(&self.network_manager);
+        let current_group = Arc::clone(&self.current_group);
+        let display_sender = display_sender.clone();
 
         tokio::spawn(async move {
             debug!("Starting UDP input task to receive multicast messages");
@@ -403,8 +325,10 @@ impl Processor {
                             Some(agora_packet::Body::UserAnnouncement(user_announcement)) => {
                                 Self::handle_network_user_announcement(
                                     user_announcement,
-                                    crypto_actor.clone(),
-                                    display_sender.clone(),
+                                    &crypto_actor,
+                                    &display_sender,
+                                    &network_manager,
+                                    &current_group,
                                 )
                                 .await;
                             }
@@ -413,6 +337,7 @@ impl Processor {
                                     &crypto_actor,
                                     &display_sender,
                                     &network_manager,
+                                    &current_group,
                                     encrypted_group_info,
                                 )
                                 .await
@@ -438,7 +363,10 @@ impl Processor {
                                         reply,
                                         &display_sender,
                                         &network_manager,
-                                    ).await.expect("Failed to handle crypto reply in udp_input"),
+                                        &current_group,
+                                    )
+                                    .await
+                                    .expect("Failed to handle crypto reply in udp_input"),
                                     Err(e) => {
                                         if let Err(display_send_error) = display_sender
                                             .send(format!("Unexpected packet type: {e}"))
@@ -488,8 +416,10 @@ impl Processor {
 
     async fn handle_network_user_announcement(
         user_announcement: &UserAnnouncement,
-        crypto_actor: ActorRef<CryptoIdentityActor>,
-        display_sender: tokio::sync::mpsc::Sender<String>,
+        crypto_actor: &ActorRef<CryptoIdentityActor>,
+        display_sender: &tokio::sync::mpsc::Sender<String>,
+        network_manager: &Arc<network::NetworkManager>,
+        current_group: &Arc<Mutex<Option<String>>>,
     ) {
         debug!(
             "Received UserAnnouncement from: {}",
@@ -503,23 +433,14 @@ impl Processor {
             })
             .await
         {
-            Ok(reply) => match reply {
-                CryptoIdentityReply::Success => {
-                    if let Err(e) = display_sender
-                        .send(format!(
-                            "Processed UserAnnouncement from {}",
-                            user_announcement.username
-                        ))
-                        .await
-                    {
-                        error!("Unable to send the decrypted msg to display: {e}");
-                    };
-                }
-                CryptoIdentityReply::Failure(e) => {
-                    error!("Failed to process new UserAnnouncement: {e}");
-                }
-                _ => unreachable!("Pack it up boys. We are done here."),
-            },
+            Ok(reply) => Self::handle_crypto_identity_reply(
+                reply,
+                display_sender,
+                network_manager,
+                current_group,
+            )
+            .await
+            .expect("Failed to handle crypto identity reply for UserAnnouncement"),
             Err(e) => {
                 if let Err(e) = display_sender.send(e.to_string()).await {
                     error!("Unable to send the error msg to display: {e}");
@@ -532,6 +453,7 @@ impl Processor {
         crypto_actor: &ActorRef<CryptoIdentityActor>,
         display_sender: &tokio::sync::mpsc::Sender<String>,
         network_manager: &Arc<network::NetworkManager>,
+        current_group: &Arc<Mutex<Option<String>>>,
         encrypted_group_info: &crate::agora_chat::EncryptedGroupInfo,
     ) -> anyhow::Result<()> {
         if !encrypted_group_info.sender_username.is_empty() {
@@ -551,8 +473,10 @@ impl Processor {
 
                 Self::handle_network_user_announcement(
                     &sender_announcement,
-                    crypto_actor.clone(),
-                    display_sender.clone(),
+                    crypto_actor,
+                    display_sender,
+                    network_manager,
+                    current_group,
                 )
                 .await;
             }
@@ -564,7 +488,13 @@ impl Processor {
             .await
         {
             Ok(reply) => {
-                Self::handle_crypto_identity_reply(reply, display_sender, network_manager).await?
+                Self::handle_crypto_identity_reply(
+                    reply,
+                    display_sender,
+                    network_manager,
+                    current_group,
+                )
+                .await?
             }
             Err(e) => {
                 display_sender.send(e.to_string()).await?;
@@ -584,6 +514,7 @@ impl Processor {
         reply: CryptoIdentityReply,
         display_sender: &tokio::sync::mpsc::Sender<String>,
         network_manager: &Arc<network::NetworkManager>,
+        current_group: &Arc<Mutex<Option<String>>>,
     ) -> anyhow::Result<()> {
         match reply {
             CryptoIdentityReply::Success => {
@@ -656,18 +587,38 @@ impl Processor {
                     .await?;
                 Ok(())
             }
-            CryptoIdentityReply::Groups { groups } => todo!(),
-            CryptoIdentityReply::Users { users } => todo!(),
-            CryptoIdentityReply::UserAnnouncement(agora_packet) => todo!(),
+            CryptoIdentityReply::Groups { groups } => {
+                let group_list = groups.join(", ");
+                display_sender
+                    .send(format!("Known groups: {group_list}"))
+                    .await?;
+                Ok(())
+            }
+            CryptoIdentityReply::Users { users } => {
+                let user_list = users.join(", ");
+                display_sender
+                    .send(format!("Known users: {user_list}"))
+                    .await?;
+                Ok(())
+            }
+            CryptoIdentityReply::UserAnnouncement(agora_packet) => {
+                network_manager
+                    .send_message(crate::protobuf_wrapper::ProtoMlsMessageOut(agora_packet))
+                    .await?;
+
+                display_sender
+                    .send(format!("User announcement sent successfully"))
+                    .await?;
+                Ok(())
+            }
+
             CryptoIdentityReply::ExternalCommitCreated {
                 commit_message,
                 group_name,
             } => {
                 let msg = commit_message.try_into()?;
 
-                if let Err(e) = network_manager.send_message(msg).await {
-                    error!("Failed to send message over network: {}", e);
-                }
+                network_manager.send_message(msg).await?;
 
                 // update the current group
                 // NOTE: The curly braces are important to limit the scope of the lock
