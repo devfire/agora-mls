@@ -127,6 +127,12 @@ pub enum CryptoIdentityReply {
     /// This is used for announcing one's identity to others in response to the /announce command.
     UserAnnouncement(AgoraPacket),
 
+    /// A reply type to return the external commit AND the group name
+    ExternalCommitCreated {
+        commit_message: MlsMessageOut,
+        group_name: String,
+    },
+
     /// Generic success
     Success,
     /// Operation failed
@@ -665,7 +671,11 @@ impl CryptoIdentityActor {
         // Add the group name to self.group_name_to_id
         self.group_name_to_id.insert(group_name.clone(), group_id);
 
-        Ok(CryptoIdentityReply::MlsMessageOut(commit_message))
+        // Ok(CryptoIdentityReply::MlsMessageOut(commit_message))
+        Ok(CryptoIdentityReply::ExternalCommitCreated {
+            commit_message,
+            group_name,
+        })
     }
 
     fn create_user_announcement(&mut self) -> Result<CryptoIdentityReply> {

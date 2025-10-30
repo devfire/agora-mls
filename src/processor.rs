@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tracing::{debug, error};
 
 use crate::{
-    agora_chat::UserAnnouncement,
+    agora_chat::{UserAnnouncement, agora_packet},
     command::Command,
     crypto_identity_actor::{
         CryptoIdentityActor, CryptoIdentityMessage, CryptoIdentityReply, ProcessedMessageResult,
@@ -303,7 +303,6 @@ impl Processor {
                                     .await
                                     .expect("Unable to send the decrypted msg to display");
                             }
-
                             CryptoIdentityReply::EncryptedGroupInfoForExternalInvite {
                                 encrypted_group_info,
                             } => {
@@ -321,10 +320,14 @@ impl Processor {
                                     );
                                 } else {
                                     if let Err(e) = display_sender
-                                        .send("HPKE-encrypted GroupInfo sent for external commit join".to_string())
-                                        .await {
-                                            error!("Unable to send status message to display: {e}");
-                                        }
+                                        .send(
+                                            "Encrypted GroupInfo sent for external commit join"
+                                                .to_string(),
+                                        )
+                                        .await
+                                    {
+                                        error!("Unable to send status message to display: {e}");
+                                    }
                                 }
                             }
                             CryptoIdentityReply::MlsMessageOut(mls_message_out) => {
@@ -404,6 +407,34 @@ impl Processor {
                                     error!("Unable to send the list of users to display: {e}");
                                 }
                             }
+                            CryptoIdentityReply::ExternalCommitCreated {
+                                commit_message,
+                                group_name,
+                            } => {
+                                let msg = if let Ok(msg) = commit_message.try_into() {
+                                    msg
+                                } else {
+                                    error!("Received invalid MlsMessageOut packet");
+                                    continue;
+                                };
+
+                                if let Err(e) = network_manager.send_message(msg).await {
+                                    error!("Failed to send message over network: {}", e);
+                                }
+
+                                // update the current group
+                                // NOTE: The curly braces are important to limit the scope of the lock
+                                {
+                                    let mut group = current_group.lock();
+                                    *group = Some(group_name);
+                                }
+                                if let Err(e) = display_sender
+                                    .send("Sent external commit to group members.".to_string())
+                                    .await
+                                {
+                                    error!("Unable to send a message to display: {e}");
+                                }
+                            }
                         },
                         Err(e) => {
                             error!("Failed to send command to state actor: {}", e);
@@ -431,9 +462,7 @@ impl Processor {
                     Ok(packet) => {
                         // Handle different message types
                         match &packet.0.body {
-                            Some(crate::agora_chat::agora_packet::Body::UserAnnouncement(
-                                user_announcement,
-                            )) => {
+                            Some(agora_packet::Body::UserAnnouncement(user_announcement)) => {
                                 Self::handle_network_user_announcement(
                                     user_announcement,
                                     crypto_actor.clone(),
@@ -441,10 +470,8 @@ impl Processor {
                                 )
                                 .await;
                             }
-                            Some(crate::agora_chat::agora_packet::Body::EncryptedGroupInfo(
-                                encrypted_group_info,
-                            )) => {
-                                Self::fun_name(
+                            Some(agora_packet::Body::EncryptedGroupInfo(encrypted_group_info)) => {
+                                Self::handle_encrypted_group_info(
                                     &crypto_actor,
                                     &display_sender,
                                     &network_manager,
@@ -515,16 +542,20 @@ impl Processor {
                                                 .await
                                             {
                                                 error!(
-                                                    "Unable to send the list of users to display: {e}"
+                                                    "Unable to send the error msg to display: {e}"
                                                 );
                                             }
                                         }
                                     },
                                     Err(e) => {
-                                        display_sender
-                                            .send(e.to_string())
+                                        if let Err(display_send_error) = display_sender
+                                            .send(format!("Unexpected packet type: {e}"))
                                             .await
-                                            .expect("Unable to send the error msg to display");
+                                        {
+                                            error!(
+                                                "Unable to send the error msg to display: {display_send_error}"
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -605,7 +636,7 @@ impl Processor {
         }
     }
 
-    async fn fun_name(
+    async fn handle_encrypted_group_info(
         crypto_actor: &ActorRef<CryptoIdentityActor>,
         display_sender: &tokio::sync::mpsc::Sender<String>,
         network_manager: &Arc<network::NetworkManager>,
@@ -671,7 +702,52 @@ impl Processor {
                 CryptoIdentityReply::Failure(e) => {
                     error!("Failed to process EncryptedGroupInfo: {e}");
                 }
-                _ => unreachable!("Some horrible thing happened."),
+                CryptoIdentityReply::GroupCreated(_) => todo!(),
+                CryptoIdentityReply::EncryptedGroupInfoForExternalInvite {
+                    encrypted_group_info,
+                } => todo!(),
+                CryptoIdentityReply::MessageProcessed { result } => todo!(),
+                CryptoIdentityReply::GroupJoined { group_name } => todo!(),
+                CryptoIdentityReply::Groups { groups } => todo!(),
+                CryptoIdentityReply::Users { users } => todo!(),
+                CryptoIdentityReply::UserAnnouncement(agora_packet) => todo!(),
+                CryptoIdentityReply::ExternalCommitCreated {
+                    commit_message,
+                    group_name,
+                } => {
+                    let msg = if let Ok(msg) = commit_message.try_into() {
+                        msg
+                    } else {
+                        error!("Received invalid MlsMessageOut packet");
+                        return;
+                    };
+
+                    if let Err(e) = network_manager.send_message(msg).await {
+                        error!("Failed to send message over network: {}", e);
+                    }
+                    if let Err(e) = display_sender
+                        .send(format!(
+                            "ExternalCommit created for {group_name} and sent to group members.",
+                        ))
+                        .await
+                    {
+                        error!("Unable to send invitation notification to display: {e}");
+                    }
+
+                    // update the current group
+                    // NOTE: The curly braces are important to limit the scope of the lock
+                    // {
+                    //     let mut group = current_group.lock();
+                    //     *group = Some(group_name);
+                    // }
+                    // if let Err(e) = display_sender
+                    //     .send("Sent external commit to group members.".to_string())
+                    //     .await
+                    // {
+                    //     error!("Unable to send a message to display: {e}");
+                    // }
+                }
+                CryptoIdentityReply::Success => todo!(),
             },
             Err(e) => {
                 if let Err(e) = display_sender.send(e.to_string()).await {
