@@ -2,7 +2,7 @@ use kameo::prelude::ActorRef;
 
 use parking_lot::Mutex; // for more efficient locking
 use rustyline::{Editor, config::Builder, error::ReadlineError, history::DefaultHistory};
-use std::{any, sync::Arc};
+use std::sync::Arc;
 use tracing::{debug, error};
 
 use crate::{
@@ -11,7 +11,6 @@ use crate::{
     crypto_identity_actor::{
         CryptoIdentityActor, CryptoIdentityMessage, CryptoIdentityReply, ProcessedMessageResult,
     },
-    error::CryptoIdentityActorError,
     network,
     protobuf_wrapper::ProtoMlsMessageOut, // state_actor::{StateActor, StateActorMessage, StateActorReply},
 };
@@ -404,10 +403,12 @@ impl Processor {
                 eprintln!("{message}");
 
                 // Print the correct prompt with current group
-                let group = current_group.lock(); // parking_lot doesn't need unwrap
-                let prompt = match &*group {
-                    Some(g) => format!("\x1b[36m[{}]\x1b[0m {} > ", g, nick),
-                    None => format!("{} > ", nick),
+                let prompt = {
+                    let group = current_group.lock();
+                    match &*group {
+                        Some(g) => format!("\x1b[36m[{}]\x1b[0m {} > ", g, nick),
+                        None => format!("{} > ", nick),
+                    }
                 };
                 eprint!("{}", prompt);
             }
