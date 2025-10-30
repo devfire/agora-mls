@@ -14,7 +14,6 @@ pub struct ProtoMlsMessageOut(pub agora_chat::AgoraPacket);
 /// message types:
 /// - PublicMessage: Application messages visible to all group members
 /// - PrivateMessage: Encrypted messages for specific recipients
-/// - Welcome: Messages used to add new members to a group
 /// - GroupInfo: Information about group state and configuration
 /// - KeyPackage: Public keys used for handshake operations
 ///
@@ -43,22 +42,22 @@ impl TryFrom<MlsMessageOut> for ProtoMlsMessageOut {
                 };
                 agora_chat::agora_packet::Body::PrivateMessage(inner)
             }
-            MlsMessageBodyOut::Welcome(_) => {
-                let inner = agora_chat::Welcome {
-                    tls_serialized_welcome_message: mls_message_bytes,
-                };
-                agora_chat::agora_packet::Body::Welcome(inner)
-            }
             MlsMessageBodyOut::GroupInfo(_) => {
                 let inner = agora_chat::GroupInfo {
                     tls_serialized_group_info: mls_message_bytes,
                 };
                 agora_chat::agora_packet::Body::GroupInfo(inner)
             }
-            // Note: KeyPackage is sent via UserAnnouncement, not as a standalone message
             MlsMessageBodyOut::KeyPackage(_) => {
                 // This shouldn't happen in normal flow - KeyPackages are wrapped in UserAnnouncement
                 panic!("Bare KeyPackage should not be sent - use UserAnnouncement instead")
+            }
+            MlsMessageBodyOut::Welcome(_welcome) => {
+                unimplemented!(
+                    "Welcome messages are not implemented in this wrapper. \n
+                This implementation uses the modern external commit pattern with GroupInfo instead.
+"
+                )
             }
         };
 
@@ -107,7 +106,6 @@ impl TryFrom<ProtoMlsMessageIn> for MlsMessageIn {
                 agora_chat::agora_packet::Body::PrivateMessage(m) => {
                     m.tls_serialized_private_message
                 }
-                agora_chat::agora_packet::Body::Welcome(m) => m.tls_serialized_welcome_message,
                 agora_chat::agora_packet::Body::GroupInfo(m) => m.tls_serialized_group_info,
                 agora_chat::agora_packet::Body::UserAnnouncement(m) => {
                     // UserAnnouncement contains both username and key package
@@ -115,9 +113,12 @@ impl TryFrom<ProtoMlsMessageIn> for MlsMessageIn {
                     m.tls_serialized_key_package
                 }
                 agora_chat::agora_packet::Body::EncryptedGroupInfo(m) => {
-                    // EncryptedGroupInfo contains HPKE-encrypted GroupInfo
-                    // This should be handled specially by the recipient for decryption
-                    m.hpke_ciphertext
+                    // EncryptedGroupInfo contains HPKE-encrypted GroupInfo with separate KEM output and ciphertext
+                    // Concatenate them for MLS processing (KEM output + ciphertext)
+                    let mut combined = Vec::new();
+                    combined.extend_from_slice(&m.kem_output);
+                    combined.extend_from_slice(&m.ciphertext);
+                    combined
                 }
             },
             // If the `body` is `None`, the message is invalid.

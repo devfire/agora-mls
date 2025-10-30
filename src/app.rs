@@ -52,20 +52,12 @@ impl App {
             &self.config.chat_id,
         )?);
 
-        // let state_actor_ref = StateActor::spawn(StateActor::new(
-        //     crypto_identity_ref.clone(),
-        // ));
-
         // Kick off the processor & share everything it needs
         let processor = Processor::new(self.config.chat_id.clone(), Arc::clone(&network_manager));
 
         // Note the distinct lack of .await here - we want to spawn these tasks and let them run concurrently
         // rather than waiting for each to complete before starting the next.
-        let stdin_handle = processor.spawn_stdin_input_task(
-            command_sender,
-            message_sender.clone(),
-            display_sender.clone(),
-        );
+        let stdin_handle = processor.spawn_stdin_input_task(command_sender, message_sender.clone());
 
         let command_handle = processor.spawn_command_handler_task(
             crypto_identity_ref.clone(),
@@ -73,9 +65,10 @@ impl App {
             display_sender.clone(),
         );
 
-        let message_handle = processor.spawn_message_handler_task(
+        let message_handle = processor.spawn_ui_input_handler_task(
             crypto_identity_ref.clone(),
             message_receiver,
+            message_sender.clone(),
             display_sender.clone(),
         );
 

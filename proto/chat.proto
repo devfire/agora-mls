@@ -16,10 +16,9 @@ message AgoraPacket {
   oneof body {
     PublicMessage public_message = 2;
     PrivateMessage private_message = 3;
-    Welcome welcome = 4;
-    GroupInfo group_info = 5;
-    UserAnnouncement user_announcement = 7;
-    EncryptedGroupInfo encrypted_group_info = 8;
+    GroupInfo group_info = 4;
+    UserAnnouncement user_announcement = 6;
+    EncryptedGroupInfo encrypted_group_info = 7;
   }
 }
 
@@ -71,13 +70,17 @@ message UserAnnouncement {
 // not yet a member of the group. The recipient can decrypt using their HPKE private
 // key and then use the GroupInfo to create an external commit.
 message EncryptedGroupInfo {
-  // The unique ID of the group this invite is for.
-  // This is sent in plaintext and used as the AAD for HPKE decryption.
-  bytes group_id = 1;
+  // The KEM output from HPKE encryption.
+  bytes kem_output = 1;
 
   // The HPKE ciphertext containing the encrypted GroupInfo.
-  bytes hpke_ciphertext = 2;
+  bytes ciphertext = 2;
 
-  // The length of the KEM output portion.
-  uint32 kem_output_length = 3;
+  // The username of the sender who created this invitation.
+  // This allows recipients to know who invited them before decrypting.
+  string sender_username = 3;
+
+  // The sender's KeyPackage for return communication.
+  // This allows the recipient to encrypt messages back to the sender.
+  bytes sender_key_package = 4;
 }
