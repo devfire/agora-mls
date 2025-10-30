@@ -12,7 +12,7 @@ use openmls::prelude::{
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::{OpenMlsRustCrypto, RustCrypto};
 use ssh_key::PrivateKey;
-use tracing::debug;
+
 use zeroize::Zeroizing;
 
 /// Combined actor managing both SSH identity and MLS protocol state.

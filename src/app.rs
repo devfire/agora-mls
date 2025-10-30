@@ -57,10 +57,7 @@ impl App {
 
         // Note the distinct lack of .await here - we want to spawn these tasks and let them run concurrently
         // rather than waiting for each to complete before starting the next.
-        let stdin_handle = processor.spawn_stdin_input_task(
-            command_sender,
-            message_sender.clone(),
-        );
+        let stdin_handle = processor.spawn_stdin_input_task(command_sender, message_sender.clone());
 
         let command_handle = processor.spawn_command_handler_task(
             crypto_identity_ref.clone(),
@@ -71,6 +68,7 @@ impl App {
         let message_handle = processor.spawn_ui_input_handler_task(
             crypto_identity_ref.clone(),
             message_receiver,
+            message_sender.clone(),
             display_sender.clone(),
         );
 
