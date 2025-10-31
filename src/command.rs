@@ -102,17 +102,21 @@ impl Command {
     pub fn show_custom_help() {
         println!("╭─ Chat Commands ─────────────────────────────────────────╮");
         println!("│                                                         │");
-        println!("│  /leave [channel]               Leave channel           │");
+        println!("│  /invite <nick> <group>         Invite user to group    │");
+        println!("│  /leave <channel>               Leave channel           │");
         println!("│  /msg <user> <message>          Send private message    │");
-        println!("│  /nick <nickname>               Change your nickname    │");
-        println!("│  /users                         List users in channel   │");
-        println!("│  /channels                      List available channels │");
-        println!("│  /help                          Show this help          │");
+        println!("│  /create-group <name>           Create a new group      │");
+        println!("│  /users                         List known users        │");
+        println!("│  /groups                        List available groups   │");
+        println!("│  /group <name>                  Switch to a group       │");
+        println!("│  /safety                        Show safety number      │");
+        println!("│  /announce                      Send MLS key package    │");
         println!("│  /quit, /q                      Exit the chat           │");
         println!("│                                                         │");
         println!("│  Examples:                                              │");
         println!("│    /msg alice Hey there!                                │");
-        println!("│    /nick CoolUser                                       │");
+        println!("│    /invite bob engineering                              │");
+        println!("│    /create-group team-chat                              │");
         println!("│                                                         │");
         println!("╰─────────────────────────────────────────────────────────╯");
     }
