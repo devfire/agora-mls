@@ -316,11 +316,13 @@ impl Processor {
         tokio::spawn(async move {
             debug!("Starting UDP input task to receive multicast messages");
 
+            let mut recv_buf = vec![0u8; network_manager.buffer_size()];
+
             loop {
-                match network_manager.receive_message().await {
+                match network_manager.receive_message(&mut recv_buf).await {
                     Ok(packet) => {
                         // Handle different message types
-                        match &packet.0.body {
+                        match &packet.0.0.body {
                             Some(agora_packet::Body::UserAnnouncement(user_announcement)) => {
                                 Self::handle_network_user_announcement(
                                     user_announcement,
@@ -347,7 +349,7 @@ impl Processor {
                             _ => {
                                 // All other messages (PublicMessage, PrivateMessage, Welcome, GroupInfo)
                                 // go to the crypto actor as MlsMessageIn
-                                let mls_message_in = if let Ok(msg) = packet.try_into() {
+                                let mls_message_in = if let Ok(msg) = packet.0.try_into() {
                                     msg
                                 } else {
                                     error!("Received invalid MlsMessageIn packet");

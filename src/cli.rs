@@ -1,5 +1,6 @@
 use clap::Parser;
 use std::{
+    fs,
     net::SocketAddr,
     path::{Path, PathBuf},
 };
@@ -92,8 +93,8 @@ impl ChatArgs {
             ));
         }
 
-        // Validate key file if provided
-
+        // Validate key file - use metadata() to avoid TOCTOU race condition
+        // This performs a single syscall instead of separate exists() and is_file() checks
         let expanded_path = shellexpand::tilde(
             self.key_file
                 .to_str()
@@ -102,13 +103,25 @@ impl ChatArgs {
         .to_string();
         let path = Path::new(&expanded_path);
 
-        if !path.exists() {
-            return Err(format!("Key file '{}' does not exist", path.display()));
+        // Single atomic check using metadata - eliminates TOCTOU window
+        match fs::metadata(path) {
+            Ok(metadata) => {
+                if !metadata.is_file() {
+                    return Err(format!(
+                        "Key file '{}' exists but is not a regular file",
+                        path.display()
+                    ));
+                }
+            }
+            Err(e) => {
+                return Err(format!(
+                    "Cannot access key file '{}': {}",
+                    path.display(),
+                    e
+                ));
+            }
         }
-
-        if !path.is_file() {
-            return Err(format!("Key file '{}' is not a valid file", path.display()));
-        }
+        
         Ok(())
     }
 }

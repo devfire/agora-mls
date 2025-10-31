@@ -207,6 +207,10 @@ impl NetworkManager {
         Ok(manager)
     }
 
+    pub fn buffer_size(&self) -> usize {
+        self.config.buffer_size
+    }
+
     /// Create and configure a UDP socket for multicast operations
     fn create_multicast_socket(config: &NetworkConfig) -> Result<std::net::UdpSocket> {
         // Create socket with socket2 for advanced configuration
@@ -312,13 +316,23 @@ impl NetworkManager {
     ///
     /// Uses a pre-allocated buffer for better performance. The buffer size
     /// is configured during NetworkManager creation.
-    pub async fn receive_message(&self) -> Result<ProtoMlsMessageIn> {
-        // Pre-allocate buffer with configured size for optimal performance
-        let mut buffer = vec![0u8; self.config.buffer_size];
+    pub async fn receive_message<'a>(
+        &self,
+        buffer: &'a mut [u8],
+    ) -> Result<(ProtoMlsMessageIn, SocketAddr)> {
+        if buffer.len() < self.config.buffer_size {
+            warn!(
+                "Receive buffer ({} bytes) is smaller than configured size ({} bytes).",
+                buffer.len(),
+                self.config.buffer_size
+            );
+            // Or return an error:
+            // return Err(NetworkError::CustomError("Buffer too small".to_string()).into());
+        }
 
         let (len, remote_addr) = self
             .socket
-            .recv_from(&mut buffer)
+            .recv_from(buffer)
             .await
             .context("Failed to receive data from socket")?;
 
@@ -328,6 +342,6 @@ impl NetworkManager {
 
         debug!("Received {} bytes from {}", len, remote_addr);
 
-        Ok(packet)
+        Ok((packet, remote_addr))
     }
 }
