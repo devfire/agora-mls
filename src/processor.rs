@@ -226,14 +226,22 @@ impl Processor {
                     .await
                 {
                     Ok(reply) => {
-                        Self::handle_crypto_identity_reply(
+                        if let Err(e) = Self::handle_crypto_identity_reply(
                             reply,
                             &display_sender,
                             &network_manager,
                             &current_group,
                         )
                         .await
-                        .expect("Failed to handle crypto identity reply");
+                        {
+                            if let Err(display_send_error) =
+                                display_sender.send(format!("Error: {e}")).await
+                            {
+                                error!(
+                                    "Unable to send the error msg to display: {display_send_error}"
+                                );
+                            }
+                        }
                     }
                     Err(e) => {
                         error!(
@@ -360,14 +368,24 @@ impl Processor {
                                     .ask(CryptoIdentityMessage::ProcessMessage { mls_message_in })
                                     .await
                                 {
-                                    Ok(reply) => Self::handle_crypto_identity_reply(
-                                        reply,
-                                        &display_sender,
-                                        &network_manager,
-                                        &current_group,
-                                    )
-                                    .await
-                                    .expect("Failed to handle crypto reply in udp_input"),
+                                    Ok(reply) => {
+                                        if let Err(e) = Self::handle_crypto_identity_reply(
+                                            reply,
+                                            &display_sender,
+                                            &network_manager,
+                                            &current_group,
+                                        )
+                                        .await
+                                        {
+                                            if let Err(display_send_error) =
+                                                display_sender.send(format!("Error: {e}")).await
+                                            {
+                                                error!(
+                                                    "Unable to send the error msg to display: {display_send_error}"
+                                                );
+                                            }
+                                        }
+                                    }
                                     Err(e) => {
                                         if let Err(display_send_error) = display_sender
                                             .send(format!("Unexpected packet type: {e}"))
@@ -436,14 +454,24 @@ impl Processor {
             })
             .await
         {
-            Ok(reply) => Self::handle_crypto_identity_reply(
-                reply,
-                display_sender,
-                network_manager,
-                current_group,
-            )
-            .await
-            .expect("Failed to handle crypto identity reply for UserAnnouncement"),
+            Ok(reply) => {
+                if let Err(e) = Self::handle_crypto_identity_reply(
+                    reply,
+                    display_sender,
+                    network_manager,
+                    current_group,
+                )
+                .await
+                {
+                    if let Err(display_send_error) = display_sender
+                        .send(format!("Error: {e}"))
+                        .await
+                    {
+                        error!("Unable to send the error msg to display: {display_send_error}");
+                    }
+                }
+            }
+
             Err(e) => {
                 if let Err(e) = display_sender.send(e.to_string()).await {
                     error!("Unable to send the error msg to display: {e}");

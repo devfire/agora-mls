@@ -17,11 +17,11 @@ Agora MLS combines the security guarantees of the Messaging Layer Security (MLS)
 **Problem:** Traditional chat applications rely on centralized servers that become single points of failure and control. Peer-to-peer solutions often lack proper security or are difficult to set up.
 
 **Solution:** Agora MLS provides:
-- ✨ **End-to-End Encryption** via the MLS protocol (IETF RFC 9420)
-- 🔒 **Decentralized Architecture** with no central server required
-- 🚀 **Zero-Configuration Networking** using UDP multicast
-- ⚡ **Actor-Based Concurrency** for responsive, scalable performance
-- 🔐 **Identity Verification** through safety numbers (similar to Signal)
+- **End-to-End Encryption** via the MLS protocol (IETF RFC 9420)
+- **Decentralized Architecture** with no central server required
+- **Zero-Configuration Networking** using UDP multicast
+- **Actor-Based Concurrency** for responsive, scalable performance
+- **Identity Verification** through safety numbers (similar to Signal)
 
 ### Key Differentiators
 
@@ -34,19 +34,19 @@ Agora MLS combines the security guarantees of the Messaging Layer Security (MLS)
 
 ## Features
 
-- 🔐 **MLS Protocol Integration**: Implements the Messaging Layer Security protocol for group encryption
-- 🌐 **UDP Multicast Communication**: Serverless networking using UDP multicast groups
-- 🎭 **Identity Management**: Ed25519-based cryptographic identities with SSH key support
-- 🔄 **Actor-Based Architecture**: Concurrent message processing using the kameo actor framework
-- 💬 **Interactive CLI**: Full-featured command-line interface with rustyline support and command parsing
-- 🔢 **Safety Numbers**: Generate identity verification fingerprints for security
-- 📦 **Protocol Buffers**: Efficient message serialization with prost and protobuf definitions
-- 🛡️ **End-to-End Encryption**: Secure group messaging with forward secrecy
-- 🔍 **Structured Logging**: Comprehensive tracing with configurable verbosity levels
-- ⚙️ **Flexible Configuration**: Multiple network interfaces and custom multicast addresses
-- 👥 **Group Management**: Create and manage multiple chat groups
-- 💬 **Private Messaging**: Send direct messages between users
-- 🔐 **SSH Key Integration**: Use existing SSH keys for identity management
+- **MLS Protocol Integration**: Implements the Messaging Layer Security protocol for group encryption
+- **UDP Multicast Communication**: Serverless networking using UDP multicast groups
+- **Identity Management**: Ed25519-based cryptographic identities with SSH key support
+- **Actor-Based Architecture**: Concurrent message processing using the kameo actor framework
+- **Interactive CLI**: Full-featured command-line interface with rustyline support and command parsing
+- **Safety Numbers**: Generate identity verification fingerprints for security
+- **Protocol Buffers**: Efficient message serialization with prost and protobuf definitions
+- **End-to-End Encryption**: Secure group messaging with forward secrecy
+- **Structured Logging**: Comprehensive tracing with configurable verbosity levels
+- **Flexible Configuration**: Multiple network interfaces and custom multicast addresses
+- **Group Management**: Create and manage multiple chat groups
+- **Private Messaging**: Send direct messages between users
+- **SSH Key Integration**: Use existing SSH keys for identity management
 
 ---
 
@@ -54,10 +54,31 @@ Agora MLS combines the security guarantees of the Messaging Layer Security (MLS)
 
 ### Prerequisites
 
+**Option 1: Using Docker** (Recommended for quick setup)
+- Docker installed on your system
+
+**Option 2: Building from Source**
 - Rust 2024 edition or later
 - An Ed25519 SSH key pair (or the tool will guide you to create one)
+- Protocol Buffers compiler (protoc) - installed automatically by cargo
 
 ### Installation
+
+#### Using Docker
+
+```bash
+# Clone the repository
+git clone https://github.com/devfire/agora-mls
+cd agora-mls
+
+# Build the Docker image
+docker build -t agora-mls .
+
+# Run the application
+docker run --rm --network host agora-mls
+```
+
+#### From Source
 
 ```bash
 # Clone the repository
@@ -155,10 +176,24 @@ Once running, use these commands in the chat interface:
 
 ## Installation
 
+### Using Docker
+
+```bash
+# Clone and build
+git clone https://github.com/devfire/agora-mls
+cd agora-mls
+docker build -t agora-mls .
+
+# Run
+docker run --rm --network host agora-mls
+```
+
+See the [Docker Deployment](#docker-deployment) section for detailed usage.
+
 ### From Source
 
 ```bash
-git clone https://github.com/<username>/agora-mls
+git clone https://github.com/devfire/agora-mls
 cd agora-mls
 cargo build --release
 ./target/release/agora-mls
@@ -176,6 +211,89 @@ cargo run -- --log-level debug
 # Run with trace logging for detailed diagnostics
 cargo run -- --log-level trace
 ```
+
+### Docker Deployment
+
+Agora MLS can be deployed using Docker for consistent, isolated execution across different environments.
+
+#### Building the Docker Image
+
+```bash
+# Build the image
+docker build -t agora-mls .
+
+# Build with a specific tag
+docker build -t agora-mls:latest .
+```
+
+The Dockerfile uses a multi-stage build process:
+- **Build stage**: Compiles the Rust application with all dependencies
+- **Runtime stage**: Creates a minimal image (~100MB) with only the binary and runtime dependencies
+
+#### Running with Docker
+
+Basic usage:
+```bash
+# Display help
+docker run --rm agora-mls
+
+# Run with default settings
+docker run --rm --network host agora-mls
+```
+
+**Important**: Use `--network host` to enable UDP multicast communication on Linux. On macOS and Windows, Docker networking may require additional configuration for multicast support.
+
+Advanced usage with custom options:
+```bash
+# Run with custom chat ID and multicast address
+docker run --rm --network host agora-mls \
+  --chat-id my-secure-chat \
+  --multicast-address 239.1.2.3:9000
+
+# Run with persistent storage for SSH keys
+docker run --rm --network host \
+  -v ~/.ssh:/home/agora/.ssh:ro \
+  agora-mls --key-file /home/agora/.ssh/id_ed25519
+
+# Run interactively with mounted data directory
+docker run -it --rm --network host \
+  -v $(pwd)/data:/home/agora/.agora-mls \
+  agora-mls
+
+# Enable debug logging
+docker run --rm --network host agora-mls --log-level debug
+```
+
+#### Docker Compose Example
+
+Create a `docker-compose.yml` file:
+
+```yaml
+services:
+  agora-mls:
+    build: .
+    network_mode: host
+    volumes:
+      - ~/.ssh:/home/agora/.ssh:ro
+      - ./data:/home/agora/.agora-mls
+    command: >
+      --chat-id my-chat
+      --log-level info
+    stdin_open: true
+    tty: true
+```
+
+Run with:
+```bash
+docker-compose up
+```
+
+#### Docker Networking Notes
+
+- **Linux**: Use `--network host` for UDP multicast to work properly
+- **macOS/Windows**: Docker Desktop may require additional network configuration for multicast
+- The default multicast address `239.255.255.250:8080` works on most local networks
+- Firewall rules may need adjustment to allow UDP multicast traffic
 
 ### Platform-Specific Notes
 
@@ -304,26 +422,26 @@ cargo run -- --log-level trace
 ```
 agora-mls/
 ├── src/
-│   ├── main.rs              # Application entry point
-│   ├── lib.rs               # Library exports and module definitions
-│   ├── app.rs               # Main application coordinator
-│   ├── cli.rs               # Command-line argument parsing
-│   ├── config.rs            # Configuration management
-│   ├── command.rs           # Interactive command definitions
-│   ├── processor.rs         # Message processing and task coordination
-│   ├── network.rs           # UDP multicast networking
-│   ├── identity_actor.rs    # Cryptographic identity management
-│   ├── openmls_actor.rs     # MLS protocol handler
-│   ├── state_actor.rs       # Application state coordination
-│   ├── safety_number.rs     # Identity verification
-│   ├── error.rs             # Error types
-│   ├── protobuf_wrapper.rs  # Protocol buffer message handling
-│   └── agora_chat.rs        # Generated protobuf code
+│   ├── main.rs                   # Application entry point
+│   ├── lib.rs                    # Library exports and module definitions
+│   ├── app.rs                    # Main application coordinator
+│   ├── cli.rs                    # Command-line argument parsing
+│   ├── config.rs                 # Configuration management
+│   ├── command.rs                # Interactive command definitions
+│   ├── processor.rs              # Message processing and task coordination
+│   ├── network.rs                # UDP multicast networking
+│   ├── crypto_identity_actor.rs  # Cryptographic identity management
+│   ├── safety_number.rs          # Identity verification
+│   ├── error.rs                  # Error types
+│   ├── protobuf_wrapper.rs       # Protocol buffer message handling
+│   └── agora_chat.rs             # Generated protobuf code
 ├── proto/
-│   └── chat.proto           # Protocol buffer definitions
-├── build.rs                 # Build script for protobuf compilation
-├── Cargo.toml               # Dependencies and metadata
-└── Cargo.lock               # Dependency version locks
+│   └── chat.proto                # Protocol buffer definitions
+├── build.rs                      # Build script for protobuf compilation
+├── Dockerfile                    # Docker container definition
+├── .dockerignore                 # Docker build exclusions
+├── Cargo.toml                    # Dependencies and metadata
+└── Cargo.lock                    # Dependency version locks
 ```
 
 ### Running Tests
@@ -491,7 +609,7 @@ This project builds upon excellent work from the Rust community:
 
 ---
 
-**Made with 🦀 and ❤️ by the Rust community**
+**Made with Rust by the Rust community**
 
 ---
 
