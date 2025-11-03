@@ -4,7 +4,7 @@
 
 **A secure, distributed chat application using Messaging Layer Security (MLS) over UDP multicast**
 
-Agora MLS is a distributed chat application that leverages the OpenMLS protocol to provide end-to-end encrypted group messaging over UDP multicast. Built with modern Rust async patterns and an actor-based architecture, it offers a secure foundation for decentralized communication without relying on centralized servers.
+Agora MLS is a distributed chat application that leverages the OpenMLS protocol to provide end-to-end encrypted group messaging over UDP multicast. 
 
 ---
 
@@ -17,7 +17,7 @@ Agora MLS combines the security guarantees of the Messaging Layer Security (MLS)
 **Problem:** Traditional chat applications rely on centralized servers that become single points of failure and control. Peer-to-peer solutions often lack proper security or are difficult to set up.
 
 **Solution:** Agora MLS provides:
-- **End-to-End Encryption** via the MLS protocol (IETF RFC 9420)
+- **End-to-End Encryption** via the OpenMLS protocol (IETF RFC 9420)
 - **Decentralized Architecture** with no central server required
 - **Zero-Configuration Networking** using UDP multicast
 - **Actor-Based Concurrency** for responsive, scalable performance
@@ -32,24 +32,6 @@ Agora MLS combines the security guarantees of the Messaging Layer Security (MLS)
 
 ---
 
-## Features
-
-- **MLS Protocol Integration**: Implements the Messaging Layer Security protocol for group encryption
-- **UDP Multicast Communication**: Serverless networking using UDP multicast groups
-- **Identity Management**: Ed25519-based cryptographic identities with SSH key support
-- **Actor-Based Architecture**: Concurrent message processing using the kameo actor framework
-- **Interactive CLI**: Full-featured command-line interface with rustyline support and command parsing
-- **Safety Numbers**: Generate identity verification fingerprints for security
-- **Protocol Buffers**: Efficient message serialization with prost and protobuf definitions
-- **End-to-End Encryption**: Secure group messaging with forward secrecy
-- **Structured Logging**: Comprehensive tracing with configurable verbosity levels
-- **Flexible Configuration**: Multiple network interfaces and custom multicast addresses
-- **Group Management**: Create and manage multiple chat groups
-- **Private Messaging**: Send direct messages between users
-- **SSH Key Integration**: Use existing SSH keys for identity management
-
----
-
 ## Quick Start
 
 ### Prerequisites
@@ -59,7 +41,7 @@ Agora MLS combines the security guarantees of the Messaging Layer Security (MLS)
 
 **Option 2: Building from Source**
 - Rust 2024 edition or later
-- An Ed25519 SSH key pair (or the tool will guide you to create one)
+- An Ed25519 SSH key pair (this the only SSH type that will work!)
 - Protocol Buffers compiler (protoc) - installed automatically by cargo
 
 ### Installation
@@ -446,16 +428,7 @@ agora-mls/
 
 ### Running Tests
 
-```bash
-# Run all tests
-cargo test
-
-# Run with logging
-cargo test -- --nocapture
-
-# Run specific test
-cargo test test_name
-```
+HA, kidding: there are no tests yet.
 
 ---
 
@@ -525,9 +498,9 @@ Performance depends on:
 - Forward/backward secrecy (key rotation)
 
 **Not Protected Against**:
-- Network-level traffic analysis
-- Local network attackers with physical access
-- Compromised endpoints
+- Network-level traffic analysis (although you can't really tell who is who, exactly!)
+- Replay attacks, that's WIP!
+- Local network attackers with physical access (can cause mischief but addressing malicious actors is WIP)
 
 ---
 
