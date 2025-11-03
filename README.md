@@ -20,15 +20,8 @@ Agora MLS combines the security guarantees of the Messaging Layer Security (MLS)
 - **End-to-End Encryption** via the OpenMLS protocol (IETF RFC 9420)
 - **Decentralized Architecture** with no central server required
 - **Zero-Configuration Networking** using UDP multicast
-- **Actor-Based Concurrency** for responsive, scalable performance
+- **Actor-Based Concurrency** using [kameo](https://docs.page/tqwewe/kameo) for responsive, scalable performance
 - **Identity Verification** through safety numbers (similar to Signal)
-
-### Key Differentiators
-
-- **True Decentralization**: No server infrastructure needed - participants communicate directly via multicast
-- **Standards-Based Security**: Uses OpenMLS, an implementation of the IETF MLS protocol
-- **Modern Rust Architecture**: Built on tokio async runtime with kameo actor framework
-- **SSH Key Integration**: Leverages existing Ed25519 SSH keys for identity
 
 ---
 
