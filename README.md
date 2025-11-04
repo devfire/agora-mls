@@ -114,23 +114,6 @@ Options:
   -V, --version                        Print version
 ```
 
-### Basic Usage Examples
-
-Start a chat session with default settings:
-
-```bash
-# Use your default SSH key and join with a random chat ID
-cargo run --release
-
-# Or use the binary directly if installed
-agora-mls
-```
-
-This will:
-- Use your default SSH key (`~/.ssh/id_ed25519`)
-- Generate a random chat ID
-- Join the default multicast group (`239.255.255.250:8080`)
-
 ### Interactive Commands
 
 Once running, use these commands in the chat interface:
@@ -172,19 +155,6 @@ git clone https://github.com/devfire/agora-mls
 cd agora-mls
 cargo build --release
 ./target/release/agora-mls
-```
-
-### Development Build
-
-```bash
-# Build in debug mode (automatically compiles protobuf files)
-cargo build
-
-# Run with debug logging
-cargo run -- --log-level debug
-
-# Run with trace logging for detailed diagnostics
-cargo run -- --log-level trace
 ```
 
 ### Docker Deployment
@@ -239,44 +209,12 @@ docker run -it --rm --network host \
 docker run --rm --network host agora-mls --log-level debug
 ```
 
-#### Docker Compose Example
-
-Create a `docker-compose.yml` file:
-
-```yaml
-services:
-  agora-mls:
-    build: .
-    network_mode: host
-    volumes:
-      - ~/.ssh:/home/agora/.ssh:ro
-      - ./data:/home/agora/.agora-mls
-    command: >
-      --chat-id my-chat
-      --log-level info
-    stdin_open: true
-    tty: true
-```
-
-Run with:
-```bash
-docker-compose up
-```
-
 #### Docker Networking Notes
 
 - **Linux**: Use `--network host` for UDP multicast to work properly
 - **macOS/Windows**: Docker Desktop may require additional network configuration for multicast
 - The default multicast address `239.255.255.250:8080` works on most local networks
 - Firewall rules may need adjustment to allow UDP multicast traffic
-
-### Platform-Specific Notes
-
-**Linux**: Requires multicast support in your network stack (enabled by default in most distributions)
-
-**macOS**: Multicast should work out of the box on most networks
-
-**Windows**: May require firewall configuration to allow UDP multicast traffic
 
 ---
 
@@ -373,25 +311,6 @@ agora-mls --key-file ~/.ssh/id_ed25519
 
 ---
 
-## Development
-
-### Building from Source
-
-```bash
-# Clone the repository
-git clone https://github.com/<username>/agora-mls
-cd agora-mls
-
-# Build
-cargo build
-
-# Run tests
-cargo test
-
-# Run with development logging
-cargo run -- --log-level trace
-```
-
 ### Project Structure
 
 ```
@@ -475,7 +394,7 @@ Performance depends on:
 
 ## Security Considerations
 
-⚠️ **Important Security Notes**:
+**Important Security Notes**:
 
 1. **Network Isolation**: Multicast traffic is visible to all devices on the local network segment
 2. **Key Management**: Protect your private key file with appropriate filesystem permissions
