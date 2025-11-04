@@ -231,7 +231,7 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                 Ok(reply) => reply,
                 Err(e) => CryptoIdentityReply::Failure(e),
             },
-            CryptoIdentityMessage::GetSafetyNumber => match self.get_safety_number() {
+            CryptoIdentityMessage::GetSafetyNumber => match self.generate_safety_number() {
                 Ok(safety_number) => CryptoIdentityReply::SafetyNumber(safety_number),
                 Err(e) => CryptoIdentityReply::Failure(e),
             },
@@ -346,14 +346,6 @@ impl CryptoIdentityActor {
                 true, // with_ratchet_tree - include the ratchet tree for external commits
             )
             .context("Failed to export GroupInfo")?;
-
-        // Serialize GroupInfo to bytes for encryption
-        // let group_info_bytes = match group_info_out.tls_serialize_detached() {
-        //     Ok(bytes) => bytes,
-        //     Err(e) => {
-        //         return Err(anyhow!("Failed to serialize GroupInfo: {e}"));
-        //     }
-        // };
 
         // Extract the HPKE public key from the recipient's KeyPackage
         let recipient_hpke_key = key_package.hpke_init_key();
@@ -729,26 +721,14 @@ impl CryptoIdentityActor {
         Ok(CryptoIdentityReply::Success)
     }
     /// Get safety number for current identity
-    fn get_safety_number(&self) -> Result<SafetyNumber> {
+    fn generate_safety_number(&self) -> Result<SafetyNumber> {
         // Extract the public key from the signature keypair
         // The signature_keypair contains both private and public keys
         let public_key_bytes = self.signature_keypair.public();
 
-        // Try to create a 32-byte array from the public key bytes
-        let mut key_array = [0u8; 32];
-        if public_key_bytes.len() >= 32 {
-            key_array.copy_from_slice(&public_key_bytes[..32]);
-        } else {
-            return Err(anyhow!("Public key is too short for Ed25519"));
-        }
-
-        // Create VerifyingKey from the public key bytes
-        let verifying_key = VerifyingKey::from_bytes(&key_array)
-            .context("Failed to create VerifyingKey from signature keypair")?;
-
         // Generate safety number using the public key
-        let safety_number =
-            generate_safety_number(&verifying_key).context("Failed to generate safety number")?;
+        let safety_number = generate_safety_number(&public_key_bytes)
+            .context("Failed to generate safety number")?;
 
         Ok(safety_number)
     }
