@@ -4,7 +4,7 @@
 
 **A secure, distributed chat application using Messaging Layer Security (MLS) over UDP multicast**
 
-Agora MLS is a distributed chat application that leverages the OpenMLS protocol to provide end-to-end encrypted group messaging over UDP multicast. 
+Agora MLS is a distributed chat application that leverages the MLS protocol to provide end-to-end encrypted group messaging over UDP multicast. 
 
 ---
 
