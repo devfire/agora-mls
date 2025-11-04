@@ -332,14 +332,17 @@ impl Processor {
                         // Handle different message types
                         match &packet.0.0.body {
                             Some(agora_packet::Body::UserAnnouncement(user_announcement)) => {
-                                Self::handle_network_user_announcement(
+                                if let Err(e) = Self::handle_network_user_announcement(
                                     user_announcement,
                                     &crypto_actor,
                                     &display_sender,
                                     &network_manager,
                                     &current_group,
                                 )
-                                .await;
+                                .await
+                                {
+                                    error!("Failed to process NetworkUserAnnouncement: {}", e);
+                                };
                             }
                             Some(agora_packet::Body::EncryptedGroupInfo(encrypted_group_info)) => {
                                 if let Err(e) = Self::handle_encrypted_group_info(
@@ -501,7 +504,7 @@ impl Processor {
                     network_manager,
                     current_group,
                 )
-                .await;
+                .await?;
             }
         }
         match crypto_actor
