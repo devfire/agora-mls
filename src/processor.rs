@@ -441,7 +441,7 @@ impl Processor {
         display_sender: &tokio::sync::mpsc::Sender<String>,
         network_manager: &Arc<network::NetworkManager>,
         current_group: &Arc<Mutex<Option<String>>>,
-    ) {
+    ) -> anyhow::Result<()> {
         debug!(
             "Received UserAnnouncement from: {}",
             user_announcement.username
@@ -455,27 +455,19 @@ impl Processor {
             .await
         {
             Ok(reply) => {
-                if let Err(e) = Self::handle_crypto_identity_reply(
+                Self::handle_crypto_identity_reply(
                     reply,
                     display_sender,
                     network_manager,
                     current_group,
                 )
-                .await
-                {
-                    if let Err(display_send_error) = display_sender
-                        .send(format!("Error: {e}"))
-                        .await
-                    {
-                        error!("Unable to send the error msg to display: {display_send_error}");
-                    }
-                }
+                .await?;
+                Ok(())
             }
 
             Err(e) => {
-                if let Err(e) = display_sender.send(e.to_string()).await {
-                    error!("Unable to send the error msg to display: {e}");
-                };
+                display_sender.send(e.to_string()).await?;
+                Err(anyhow!("Unable to send the error msg to display"))
             }
         }
     }
