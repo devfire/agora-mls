@@ -269,41 +269,53 @@ impl Processor {
             while let Some(command) = receiver.recv().await {
                 debug!("Command handler received command: {:?}", command);
 
-                // Update local state for UI when switching groups
-                if let Command::Group { ref name } = command {
-                    let mut group = current_group.lock();
-                    *group = Some(name.clone());
-                    println!("\x1b[32m✓ Switched to group: {}\x1b[0m", name);
-                }
+                // // Update local state for UI when switching groups
+                // if let Command::Group { ref name } = command {
+                //     let mut group = current_group.lock();
+                //     *group = Some(name.clone());
+                //     println!("\x1b[32m✓ Switched to group: {}\x1b[0m", name);
+                // }
 
-                // Also update when creating a group
-                if let Command::CreateGroup { ref name } = command {
-                    let mut group = current_group.lock();
-                    *group = Some(name.clone());
-                }
+                // // Also update when creating a group
+                // if let Command::CreateGroup { ref name } = command {
+                //     let mut group = current_group.lock();
+                //     *group = Some(name.clone());
+                // }
 
-                // The flow is like is:
-                // 1. User types in command in stdin_input_task via rustyline
-                // 2. Input is converted to Command and sent to command_handler_task via channel
-                // 3. command.to_crypto_message() converts Command to CryptoIdentityMessage. This is needed because not all command map to crypto actions.
-                // 4. command_handler_task sends CryptoIdentityMessage to crypto_actor and awaits reply
-                // 5. command_handler_task processes CryptoIdentityReply and takes appropriate action
-                if let Some(c) = command.to_crypto_message() {
-                    // Forward the command to the state actor and await the reply
-                    match crypto_actor.ask(c).await {
-                        Ok(reply) => {
-                            Self::handle_crypto_identity_reply(
-                                reply,
-                                &display_sender,
-                                &network_manager,
-                                &current_group,
-                            )
-                            .await
-                            .expect("Failed to handle crypto identity reply in command handler");
-                        }
-                        Err(e) => {
-                            error!("Failed to send command to state actor: {}", e);
-                            break;
+                match &command {
+                    Command::Group { name } | Command::CreateGroup { name } => {
+                        let mut group = current_group.lock();
+                        *group = Some(name.clone());
+                        println!("\x1b[32m✓ Current group: {}\x1b[0m", name);
+                    }
+                    _ => {
+                        // The flow is like is:
+                        // 1. User types in command in stdin_input_task via rustyline
+                        // 2. Input is converted to Command and sent to command_handler_task via channel
+                        // 3. command.to_crypto_message() converts Command to CryptoIdentityMessage. This is needed because not all command map to crypto actions.
+                        // 4. command_handler_task sends CryptoIdentityMessage to crypto_actor and awaits reply
+                        // 5. command_handler_task processes CryptoIdentityReply and takes appropriate action
+                        if let Some(c) = command.to_crypto_message() {
+                            // Forward the command to the state actor and await the reply
+                            match crypto_actor.ask(c).await {
+                                Ok(reply) => {
+                                    if let Err(e) = Self::handle_crypto_identity_reply(
+                                        reply,
+                                        &display_sender,
+                                        &network_manager,
+                                        &current_group,
+                                    )
+                                    .await
+                                    {
+                                        error!("Failed to handle crypto identity reply: {}", e);
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to send command to state actor: {}", e);
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -470,7 +482,7 @@ impl Processor {
 
             Err(e) => {
                 display_sender.send(e.to_string()).await?;
-                Err(anyhow!("Unable to send the error msg to display"))
+                Err(anyhow!("{e}"))
             }
         }
     }
@@ -654,6 +666,12 @@ impl Processor {
                 }
                 display_sender
                     .send("Sent external commit to group members.".to_string())
+                    .await?;
+                Ok(())
+            }
+            CryptoIdentityReply::SafetyNumber(safety_number) => {
+                display_sender
+                    .send(format!("Your safety number:\n{}", safety_number))
                     .await?;
                 Ok(())
             }

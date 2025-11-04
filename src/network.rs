@@ -250,10 +250,9 @@ impl NetworkManager {
 
             // Determine the interface to use - default to INADDR_ANY for better compatibility
             let interface_ip = if let Some(ref interface_str) = config.interface {
-                interface_str.parse::<Ipv4Addr>().unwrap_or_else(|_| {
-                    warn!("Invalid interface IP '{}', using INADDR_ANY", interface_str);
-                    Ipv4Addr::UNSPECIFIED
-                })
+                interface_str
+                    .parse::<Ipv4Addr>()
+                    .unwrap_or_else(|_| Ipv4Addr::UNSPECIFIED)
             } else {
                 Ipv4Addr::UNSPECIFIED
             };

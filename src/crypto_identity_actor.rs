@@ -1,4 +1,5 @@
-use crate::agora_chat;
+use crate::safety_number::SafetyNumber;
+use crate::{agora_chat, safety_number::generate_safety_number};
 
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
@@ -98,6 +99,9 @@ pub enum CryptoIdentityMessage {
     ProcessEncryptedGroupInfo {
         encrypted_group_info: crate::agora_chat::EncryptedGroupInfo,
     },
+
+    /// Get safety number for current identity
+    GetSafetyNumber,
 }
 
 #[derive(Reply)]
@@ -137,6 +141,8 @@ pub enum CryptoIdentityReply {
     Success,
     /// Operation failed
     Failure(anyhow::Error),
+    /// Safety number for current identity
+    SafetyNumber(SafetyNumber),
 }
 
 /// Result of processing an incoming MLS message
@@ -223,6 +229,10 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                 encrypted_group_info,
             } => match self.handle_encrypted_group_info(encrypted_group_info) {
                 Ok(reply) => reply,
+                Err(e) => CryptoIdentityReply::Failure(e),
+            },
+            CryptoIdentityMessage::GetSafetyNumber => match self.get_safety_number() {
+                Ok(safety_number) => CryptoIdentityReply::SafetyNumber(safety_number),
                 Err(e) => CryptoIdentityReply::Failure(e),
             },
         }
@@ -718,6 +728,31 @@ impl CryptoIdentityActor {
         self.user_cache.insert(user_identity, key_package_in);
         Ok(CryptoIdentityReply::Success)
     }
+    /// Get safety number for current identity
+    fn get_safety_number(&self) -> Result<SafetyNumber> {
+        // Extract the public key from the signature keypair
+        // The signature_keypair contains both private and public keys
+        let public_key_bytes = self.signature_keypair.public();
+
+        // Try to create a 32-byte array from the public key bytes
+        let mut key_array = [0u8; 32];
+        if public_key_bytes.len() >= 32 {
+            key_array.copy_from_slice(&public_key_bytes[..32]);
+        } else {
+            return Err(anyhow!("Public key is too short for Ed25519"));
+        }
+
+        // Create VerifyingKey from the public key bytes
+        let verifying_key = VerifyingKey::from_bytes(&key_array)
+            .context("Failed to create VerifyingKey from signature keypair")?;
+
+        // Generate safety number using the public key
+        let safety_number =
+            generate_safety_number(&verifying_key).context("Failed to generate safety number")?;
+
+        Ok(safety_number)
+    }
+
     /// Extract group name from MlsGroup extensions
     fn extract_group_name(group: &MlsGroup) -> Option<String> {
         const GROUP_NAME_EXTENSION_ID: u16 = 13;

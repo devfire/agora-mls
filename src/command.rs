@@ -139,6 +139,7 @@ impl Command {
             Command::Groups => Some(CryptoIdentityMessage::ListGroups),
             Command::Users => Some(CryptoIdentityMessage::ListUsers),
             Command::Announce => Some(CryptoIdentityMessage::CreateAnnouncement),
+            Command::Safety => Some(CryptoIdentityMessage::GetSafetyNumber),
             // Non-crypto commands return None
             _ => None,
         }
