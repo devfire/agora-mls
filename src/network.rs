@@ -64,12 +64,7 @@ impl NetworkConfigBuilder {
     }
 
     /// Set the multicast address (required)
-    /// Validates that the address is a valid multicast address in the 224.0.0.0/4 range
     pub fn multicast_address(mut self, address: SocketAddr) -> Self {
-        // Basic validation during construction
-        if let Err(e) = Self::validate_multicast_address(&address) {
-            warn!("Invalid multicast address provided: {}", e);
-        }
         self.multicast_address = Some(address);
         self
     }

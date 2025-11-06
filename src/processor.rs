@@ -234,13 +234,12 @@ impl Processor {
                         )
                         .await
                         {
-                            if let Err(display_send_error) =
-                                display_sender.send(format!("Error: {e}")).await
-                            {
-                                error!(
-                                    "Unable to send the error msg to display: {display_send_error}"
-                                );
-                            }
+                            display_sender
+                                .send(format!("{e}"))
+                                .await
+                                .unwrap_or_else(|e| {
+                                    error!("Unable to send the error msg to display: {e}")
+                                });
                         }
                     }
                     Err(e) => {
@@ -292,13 +291,12 @@ impl Processor {
                             .await
                             {
                                 debug!("Failed to handle crypto identity reply: {}", e);
-                                if let Err(display_send_error) =
-                                    display_sender.send(format!("{e}")).await
-                                {
-                                    error!(
-                                        "Unable to send the error msg to display: {display_send_error}"
-                                    );
-                                }
+                                display_sender
+                                    .send(format!("{e}"))
+                                    .await
+                                    .unwrap_or_else(|e| {
+                                        error!("Unable to send the msg to display: {e}")
+                                    });
                             }
                         }
                         Err(e) => {
@@ -319,7 +317,6 @@ impl Processor {
     ) -> tokio::task::JoinHandle<()> {
         let network_manager = Arc::clone(&self.network_manager);
         let current_group = Arc::clone(&self.current_group);
-        let display_sender = display_sender.clone();
 
         tokio::spawn(async move {
             debug!("Starting UDP input task to receive multicast messages");
@@ -386,14 +383,13 @@ impl Processor {
                                         }
                                     }
                                     Err(e) => {
-                                        if let Err(display_send_error) = display_sender
-                                            .send(format!("Unexpected packet type: {e}"))
-                                            .await
-                                        {
-                                            error!(
-                                                "Unable to send the error msg to display: {display_send_error}"
-                                            );
-                                        }
+                                        display_sender.send(format!("{e}")).await.unwrap_or_else(
+                                            |e| {
+                                                error!(
+                                                    "Unable to send the error msg to display: {e}"
+                                                )
+                                            },
+                                        );
                                     }
                                 }
                             }
@@ -464,10 +460,7 @@ impl Processor {
                 Ok(())
             }
 
-            Err(e) => {
-                display_sender.send(e.to_string()).await?;
-                Err(anyhow!("{e}"))
-            }
+            Err(e) => Err(anyhow!("{e}")),
         }
     }
 
@@ -585,7 +578,7 @@ impl Processor {
                 // let's see what we got
                 match result {
                     ProcessedMessageResult::ApplicationMessage(m) => {
-                        display_sender.send(format!("{m}")).await?;
+                        display_sender.send(m).await?;
                         Ok(())
                     }
 
