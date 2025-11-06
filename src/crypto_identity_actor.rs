@@ -14,6 +14,7 @@ use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::{OpenMlsRustCrypto, RustCrypto};
 use ssh_key::PrivateKey;
 
+use tracing::debug;
 use zeroize::Zeroizing;
 
 /// Combined actor managing both SSH identity and MLS protocol state.
@@ -138,7 +139,7 @@ pub enum CryptoIdentityReply {
     },
 
     /// Generic success
-    Success,
+    Success(String),
     /// Operation failed
     Failure(anyhow::Error),
     /// Safety number for current identity
@@ -167,26 +168,34 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
         _ctx: &mut kameo::message::Context<Self, Self::Reply>,
     ) -> Self::Reply {
         match msg {
-            CryptoIdentityMessage::CreateGroup { group_name } => {
-                match self.handle_create_group(group_name) {
-                    Ok(reply) => reply,
-                    Err(e) => CryptoIdentityReply::Failure(e),
-                }
+            CryptoIdentityMessage::CreateGroup { group_name } =>
+            // match self.handle_create_group(group_name) {
+            //     Ok(reply) => reply,
+            //     Err(e) => CryptoIdentityReply::Failure(e),
+            // }
+            {
+                self.handle_create_group(group_name)
+                    .unwrap_or_else(CryptoIdentityReply::Failure)
             }
+
             CryptoIdentityMessage::InviteMemberToGroup {
                 key_package,
                 group_name,
-            } => match self.invite_new_member_to_group(key_package, &group_name) {
-                Ok(reply) => reply,
-                Err(e) => CryptoIdentityReply::Failure(e),
-            },
+            } => self
+                .invite_new_member_to_group(key_package, &group_name)
+                .unwrap_or_else(CryptoIdentityReply::Failure),
+
             CryptoIdentityMessage::EncryptMessage {
                 plaintext,
                 group_name,
-            } => self.handle_encrypt_message(plaintext, &group_name),
-            CryptoIdentityMessage::ProcessMessage { mls_message_in } => {
-                self.handle_mls_message(mls_message_in)
-            }
+            } => self
+                .handle_encrypt_message(plaintext, &group_name)
+                .unwrap_or_else(CryptoIdentityReply::Failure),
+
+            CryptoIdentityMessage::ProcessMessage { mls_message_in } => self
+                .handle_mls_message(mls_message_in)
+                .unwrap_or_else(CryptoIdentityReply::Failure),
+
             CryptoIdentityMessage::ListGroups =>
             // 1. Get list of group IDs
             // 2. Fetch the corresponding MlsGroup references from the HashMap
@@ -203,20 +212,18 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
             CryptoIdentityMessage::InviteUser {
                 user_identity,
                 group_name,
-            } => match self.handle_invite_user(user_identity, &group_name) {
-                Ok(reply) => reply,
-                Err(e) => CryptoIdentityReply::Failure(e),
-            },
-            CryptoIdentityMessage::CreateAnnouncement => match self.create_user_announcement() {
-                Ok(reply) => reply,
-                Err(e) => CryptoIdentityReply::Failure(e),
-            },
-            CryptoIdentityMessage::AddNewUser { user_announcement } => {
-                match self.handle_new_user_announcement(user_announcement) {
-                    Ok(reply) => reply,
-                    Err(e) => CryptoIdentityReply::Failure(e),
-                }
-            }
+            } => self
+                .handle_invite_user(user_identity, &group_name)
+                .unwrap_or_else(CryptoIdentityReply::Failure),
+
+            CryptoIdentityMessage::CreateAnnouncement => self
+                .create_user_announcement()
+                .unwrap_or_else(CryptoIdentityReply::Failure),
+
+            CryptoIdentityMessage::AddNewUser { user_announcement } => self
+                .handle_new_user_announcement_inbound(user_announcement)
+                .unwrap_or_else(CryptoIdentityReply::Failure),
+
             CryptoIdentityMessage::ListUsers => {
                 let users: Vec<String> = self
                     .user_cache
@@ -227,14 +234,17 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
             }
             CryptoIdentityMessage::ProcessEncryptedGroupInfo {
                 encrypted_group_info,
-            } => match self.handle_encrypted_group_info(encrypted_group_info) {
-                Ok(reply) => reply,
-                Err(e) => CryptoIdentityReply::Failure(e),
-            },
-            CryptoIdentityMessage::GetSafetyNumber => match self.generate_safety_number() {
-                Ok(safety_number) => CryptoIdentityReply::SafetyNumber(safety_number),
-                Err(e) => CryptoIdentityReply::Failure(e),
-            },
+            } => self
+                .handle_encrypted_group_info(encrypted_group_info)
+                .unwrap_or_else(CryptoIdentityReply::Failure),
+
+            // The .map() approach transforms Result<SafetyNumber, Error> into Result<CryptoIdentityReply, Error>, then unwrap_or_else can work as before.
+            // This pattern applies to any arm where the function returns something other than Result<CryptoIdentityReply, _> 
+            // we need to .map() the success value into the reply type first.
+            CryptoIdentityMessage::GetSafetyNumber => self
+                .generate_safety_number()
+                .map(CryptoIdentityReply::SafetyNumber)
+                .unwrap_or_else(CryptoIdentityReply::Failure),
         }
     }
 }
@@ -249,6 +259,7 @@ impl CryptoIdentityActor {
     // ========================================================================
     /// Create a new MLS group with the specified name
     fn handle_create_group(&mut self, group_name: String) -> Result<CryptoIdentityReply> {
+        debug!("Creating group {group_name}");
         // First check if the group already exists
         if self.group_name_to_id.contains_key(&group_name) {
             return Err(anyhow!("Group '{}' already exists", group_name));
@@ -275,6 +286,8 @@ impl CryptoIdentityActor {
             }
         };
 
+        debug!("Build config for {group_name} created.");
+
         // Create the group (signature_keypair stays private)
         let group = MlsGroup::new(
             self.crypto_provider.as_ref(),
@@ -284,8 +297,12 @@ impl CryptoIdentityActor {
         )
         .context("Group creation failed")?;
 
+        debug!("Created group {group_name}");
+
         // Get the GroupId value by cloning
         let group_id = group.group_id().clone();
+
+        debug!("Group {group_name} ID {:?}", group_id);
 
         // Store the group and set as active
         self.groups.insert(group_id.clone(), group);
@@ -293,6 +310,12 @@ impl CryptoIdentityActor {
         // Store the group name for future reference when the user wants to switch groups by name
         self.group_name_to_id
             .insert(group_name.clone(), group_id.clone());
+
+        if self.group_name_to_id.contains_key(&group_name) {
+            debug!("Stored {group_name} to id mapping for future reference");
+        } else {
+            return Err(anyhow!("Failed to store {group_name} in HashMap."));
+        }
 
         Ok(CryptoIdentityReply::GroupCreated(group_name))
     }
@@ -326,7 +349,7 @@ impl CryptoIdentityActor {
         let target_group_id = match self.group_name_to_id.get(group_name) {
             Some(id) => id,
             None => {
-                return Err(anyhow!("No active group found"));
+                return Err(anyhow!("Group {group_name} not found"));
             }
         };
 
@@ -334,7 +357,7 @@ impl CryptoIdentityActor {
         let target_group_ref = match self.groups.get(&target_group_id) {
             Some(g) => g,
             None => {
-                return Err(anyhow!("No active group found"));
+                return Err(anyhow!("Group {group_name} not found"));
             }
         };
 
@@ -425,19 +448,25 @@ impl CryptoIdentityActor {
         &mut self,
         plaintext: Vec<u8>,
         group_name: &str,
-    ) -> CryptoIdentityReply {
+    ) -> Result<CryptoIdentityReply> {
         // get the target group id from the groups map
         let group_id = match self.group_name_to_id.get(group_name) {
             Some(id) => id,
             None => {
-                return CryptoIdentityReply::Failure(anyhow!("Current group not found"));
+                return Err(anyhow!(CryptoIdentityActorError::GroupNotFound(format!(
+                    "{:?}",
+                    group_name
+                ))));
             }
         };
         // Get the group
         let group_ref = match self.groups.get_mut(&group_id) {
             Some(g) => g,
             None => {
-                return CryptoIdentityReply::Failure(anyhow!("No active group found"));
+                return Err(anyhow!(CryptoIdentityActorError::GroupNotFound(format!(
+                    "{:?}",
+                    group_id
+                ))));
             }
         };
 
@@ -449,46 +478,32 @@ impl CryptoIdentityActor {
         ) {
             Ok(msg) => msg,
             Err(e) => {
-                return CryptoIdentityReply::Failure(anyhow!("Failed to encrypt message: {e}"));
+                return Err(anyhow!("Failed to encrypt message: {e}"));
             }
         };
 
-        CryptoIdentityReply::MlsMessageOut(mls_message_out)
+        Ok(CryptoIdentityReply::MlsMessageOut(mls_message_out))
     }
 
     /// Process an incoming MLS message from crypto_actor.ask(CryptoIdentityMessage::ProcessMessage { mls_message_in }) in processor.rs
-    fn handle_mls_message(&mut self, mls_message_in: MlsMessageIn) -> CryptoIdentityReply {
+    fn handle_mls_message(&mut self, mls_message_in: MlsMessageIn) -> Result<CryptoIdentityReply> {
         // Convert to ProtocolMessage
-        let protocol_message = match mls_message_in.try_into_protocol_message() {
-            Ok(pm) => pm,
-            Err(e) => {
-                return CryptoIdentityReply::Failure(anyhow!(
-                    "Failed to convert to ProtocolMessage: {e}"
-                ));
-            }
-        };
+        let protocol_message = mls_message_in.try_into_protocol_message()?;
 
         // Get the group ID from the message
         let group_id = protocol_message.group_id();
 
         // Get the group
-        let group = match self.groups.get_mut(&group_id) {
-            Some(g) => g,
-            None => {
-                return CryptoIdentityReply::Failure(anyhow!(
-                    CryptoIdentityActorError::GroupNotFound(format!("{:?}", group_id))
-                ));
-            }
-        };
+        let group = self.groups.get_mut(&group_id).ok_or_else(|| {
+            anyhow!(CryptoIdentityActorError::GroupNotFound(format!(
+                "{:?}",
+                group_id
+            )))
+        })?;
 
         // Process the message (crypto_provider has access to keys)
         let processed_message =
-            match group.process_message(self.crypto_provider.as_ref(), protocol_message) {
-                Ok(pm) => pm,
-                Err(e) => {
-                    return CryptoIdentityReply::Failure(anyhow!("Failed to process message: {e}"));
-                }
-            };
+            group.process_message(self.crypto_provider.as_ref(), protocol_message)?;
 
         // Handle different content types. Only ApplicationMessage and StagedCommitMessage are supported here.
         let result = match processed_message.into_content() {
@@ -496,9 +511,7 @@ impl CryptoIdentityActor {
                 match String::from_utf8(app_msg.into_bytes()) {
                     Ok(text) => ProcessedMessageResult::ApplicationMessage(text),
                     Err(e) => {
-                        return CryptoIdentityReply::Failure(anyhow!(
-                            "Invalid UTF-8 in message: {e}"
-                        ));
+                        return Err(anyhow!("Invalid UTF-8 in message: {e}"));
                     }
                 }
             }
@@ -514,21 +527,16 @@ impl CryptoIdentityActor {
             // though in our implementation we merge immediately after successful staging since we trust the network's MLS validation.
             ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
                 // Merge the staged commit
-                if let Err(e) =
-                    group.merge_staged_commit(self.crypto_provider.as_ref(), *staged_commit)
-                {
-                    return CryptoIdentityReply::Failure(anyhow!(
-                        "Failed to merge staged commit: {e}"
-                    ));
-                }
-                ProcessedMessageResult::StagedCommitMerged
+                group.merge_staged_commit(self.crypto_provider.as_ref(), *staged_commit)?;
+
+                ProcessedMessageResult::StagedCommitMerged // back to result
             }
             _ => {
-                return CryptoIdentityReply::Failure(anyhow!("Unsupported message content type"));
+                return Err(anyhow!("Unsupported message content type"));
             }
         };
 
-        CryptoIdentityReply::MessageProcessed { result }
+        Ok(CryptoIdentityReply::MessageProcessed { result })
     }
 
     /// Handle the new user invite request
@@ -703,7 +711,7 @@ impl CryptoIdentityActor {
     }
 
     /// Handle new user announcement
-    fn handle_new_user_announcement(
+    fn handle_new_user_announcement_inbound(
         &mut self,
         user_announcement: UserAnnouncement,
     ) -> Result<CryptoIdentityReply> {
@@ -718,7 +726,10 @@ impl CryptoIdentityActor {
 
         // Store in user cache
         self.user_cache.insert(user_identity, key_package_in);
-        Ok(CryptoIdentityReply::Success)
+        Ok(CryptoIdentityReply::Success(format!(
+            "New user {} added.",
+            user_announcement.username
+        )))
     }
     /// Get safety number for current identity
     fn generate_safety_number(&self) -> Result<SafetyNumber> {

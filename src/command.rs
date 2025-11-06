@@ -47,7 +47,7 @@ pub enum Command {
     /// Create a new group
     CreateGroup {
         /// New group name
-        name: String,
+        group_name: String,
     },
     /// List known users
     Users,
@@ -58,7 +58,7 @@ pub enum Command {
     /// Switch to a different group
     Group {
         /// Group name to switch to
-        name: String,
+        group_name: String,
     },
 
     /// Generate the safety number for the current identity
@@ -126,7 +126,7 @@ impl Command {
 impl Command {
     pub fn to_crypto_message(&self) -> Option<CryptoIdentityMessage> {
         match self {
-            Command::CreateGroup { name } => Some(CryptoIdentityMessage::CreateGroup {
+            Command::CreateGroup { group_name: name } => Some(CryptoIdentityMessage::CreateGroup {
                 group_name: name.clone(),
             }),
             Command::Invite { nick, group_name: group } => nick

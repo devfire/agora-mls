@@ -1,4 +1,3 @@
-use ed25519_dalek::VerifyingKey;
 use sha2::{Digest, Sha256};
 
 use crate::error::SafetyNumberError;
