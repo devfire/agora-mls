@@ -291,8 +291,14 @@ impl Processor {
                             )
                             .await
                             {
-                                error!("Failed to handle crypto identity reply: {}", e);
-                                break;
+                                debug!("Failed to handle crypto identity reply: {}", e);
+                                if let Err(display_send_error) =
+                                    display_sender.send(format!("{e}")).await
+                                {
+                                    error!(
+                                        "Unable to send the error msg to display: {display_send_error}"
+                                    );
+                                }
                             }
                         }
                         Err(e) => {
@@ -374,13 +380,9 @@ impl Processor {
                                         )
                                         .await
                                         {
-                                            if let Err(display_send_error) =
-                                                display_sender.send(format!("Error: {e}")).await
-                                            {
-                                                error!(
-                                                    "Unable to send the error msg to display: {display_send_error}"
-                                                );
-                                            }
+                                            // Typically, these errors are because we received a msg for an unknown group,
+                                            // so we just quietly debug log and move on
+                                            debug!("Error: {e}");
                                         }
                                     }
                                     Err(e) => {
@@ -544,9 +546,7 @@ impl Processor {
                     .context("Unable to send success message to display")?;
                 Ok(())
             }
-            CryptoIdentityReply::Failure(error) => {
-                Err(anyhow!("{error}"))
-            }
+            CryptoIdentityReply::Failure(error) => Err(anyhow!("{error}")),
             CryptoIdentityReply::GroupCreated(group_name) => {
                 display_sender
                     .send(format!("Group {group_name} created"))
