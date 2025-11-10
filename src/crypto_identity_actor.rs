@@ -3,7 +3,6 @@ use crate::{agora_chat, safety_number::generate_safety_number};
 
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
-use anyhow::{Context, Result, anyhow};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use kameo::prelude::*;
 use openmls::prelude::{
@@ -239,7 +238,7 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                 encrypted_group_info,
             } => self
                 .handle_encrypted_group_info(encrypted_group_info)
-                .unwrap_or_else(CryptoIdentityReply::Failure),
+                .unwrap_or_else(|e| CryptoIdentityReply::Failure(e)),
 
             // The .map() approach transforms Result<SafetyNumber, Error> into Result<CryptoIdentityReply, Error>, then unwrap_or_else can work as before.
             // This pattern applies to any arm where the function returns something other than Result<CryptoIdentityReply, _>
@@ -268,7 +267,7 @@ impl CryptoIdentityActor {
         debug!("Creating group {group_name}");
         // First check if the group already exists
         if self.group_name_to_id.contains_key(&group_name) {
-            return Err(CryptoIdentityActorError::GroupNotFound(group_name));
+            return Err(CryptoIdentityActorError::GroupNotFound);
         }
         const GROUP_NAME_EXTENSION_ID: u16 = 13;
 
@@ -351,22 +350,16 @@ impl CryptoIdentityActor {
         group_name: &str,
     ) -> Result<CryptoIdentityReply, CryptoIdentityActorError> {
         // Determine which group to use
-        let target_group_id = match self.group_name_to_id.get(group_name) {
-            Some(id) => id,
-            None => {
-                return Err(CryptoIdentityActorError::GroupNotFound(
-                    group_name.to_string(),
-                ));
-            }
-        };
+        let target_group_id = self
+            .group_name_to_id
+            .get(group_name)
+            .ok_or_else(|| CryptoIdentityActorError::GroupNotFound)?;
 
         // Get the group
         let target_group_ref = match self.groups.get(&target_group_id) {
             Some(g) => g,
             None => {
-                return Err(CryptoIdentityActorError::GroupNotFound(
-                    group_name.to_string(),
-                ));
+                return Err(CryptoIdentityActorError::GroupNotFound);
             }
         };
 
@@ -447,13 +440,13 @@ impl CryptoIdentityActor {
         let group_id = self
             .group_name_to_id
             .get(group_name)
-            .ok_or_else(|| CryptoIdentityActorError::GroupNotFound(group_name.to_string()))?;
+            .ok_or_else(|| CryptoIdentityActorError::GroupNotFound)?;
 
         // Get the group
         let group_ref = self
             .groups
             .get_mut(&group_id)
-            .ok_or_else(|| CryptoIdentityActorError::GroupNotFound(group_name.to_string()))?;
+            .ok_or_else(|| CryptoIdentityActorError::GroupNotFound)?;
 
         // Encrypt message (signature_keypair used HERE - stays private)
         let mls_message_out = group_ref.create_message(
@@ -477,7 +470,10 @@ impl CryptoIdentityActor {
         let group_id = protocol_message.group_id();
 
         // Get the group
-        let group = self.groups.get_mut(&group_id).ok_or_else(|| CryptoIdentityActorError::GroupNotFound)?;
+        let group = self
+            .groups
+            .get_mut(&group_id)
+            .ok_or_else(|| CryptoIdentityActorError::GroupNotFound)?;
 
         // Process the message (crypto_provider has access to keys)
         let processed_message =
@@ -486,12 +482,7 @@ impl CryptoIdentityActor {
         // Handle different content types. Only ApplicationMessage and StagedCommitMessage are supported here.
         let result = match processed_message.into_content() {
             ProcessedMessageContent::ApplicationMessage(app_msg) => {
-                match String::from_utf8(app_msg.into_bytes()) {
-                    Ok(text) => ProcessedMessageResult::ApplicationMessage(text),
-                    Err(e) => {
-                        return Err(anyhow!("Invalid UTF-8 in message: {e}"));
-                    }
-                }
+                ProcessedMessageResult::ApplicationMessage(String::from_utf8(app_msg.into_bytes())?)
             }
             // We are merging staged commits because the MLS protocol uses a two-phase commit process:
             // when another group member sends a commit message (e.g., to add/remove members or update keys),
@@ -510,7 +501,7 @@ impl CryptoIdentityActor {
                 ProcessedMessageResult::StagedCommitMerged // back to result
             }
             _ => {
-                return Err(anyhow!("Unsupported message content type"));
+                return Err(CryptoIdentityActorError::UnsupportedMessageContentType);
             }
         };
 
@@ -532,17 +523,9 @@ impl CryptoIdentityActor {
             .ok_or_else(|| CryptoIdentityActorError::UserNotFound(group_name.to_string()))?;
 
         // Validate the KeyPackageIn
-        let validated_keypackage =
-            match key_package_in.validate(&RustCrypto::default(), ProtocolVersion::Mls10) {
-                Ok(vkp) => vkp,
-                Err(e) => {
-                    return Err(anyhow!(
-                        "Invalid KeyPackage for user '{}': {}",
-                        user_identity,
-                        e
-                    ));
-                }
-            };
+        let validated_keypackage = key_package_in
+            .clone()
+            .validate(&RustCrypto::default(), ProtocolVersion::Mls10)?;
 
         // Invite the member to the active group
         Ok(self.invite_new_member_to_group(validated_keypackage, group_name)?)
@@ -560,7 +543,7 @@ impl CryptoIdentityActor {
     fn handle_encrypted_group_info(
         &mut self,
         encrypted_group_info: crate::agora_chat::EncryptedGroupInfo,
-    ) -> Result<CryptoIdentityReply> {
+    ) -> Result<CryptoIdentityReply, CryptoIdentityActorError> {
         // 1. DECRYPT THE PAYLOAD
         // ======================
 
@@ -580,15 +563,13 @@ impl CryptoIdentityActor {
         let crypto = RustCrypto::default();
 
         // Decrypt using our OWN HPKE private key from our KeyPackageBundle.
-        let confidential_bytes = crypto
-            .hpke_open(
-                self.ciphersuite.hpke_config(),
-                &hpke_ciphertext,
-                self.mls_key_package_bundle.init_private_key(),
-                info,
-                aad,
-            )
-            .context("Failed to HPKE decrypt GroupInfo")?;
+        let confidential_bytes = crypto.hpke_open(
+            self.ciphersuite.hpke_config(),
+            &hpke_ciphertext,
+            self.mls_key_package_bundle.init_private_key(),
+            info,
+            aad,
+        )?;
 
         // ============================
         // 2. DESERIALIZE THE GroupInfo + GroupId TUPLE
@@ -602,18 +583,15 @@ impl CryptoIdentityActor {
         // The compiler sees (T, U) and correctly invokes the deserializer for the tuple.
 
         let (group_info_bytes, group_id): (Vec<u8>, GroupId) =
-            Deserialize::tls_deserialize(&mut &confidential_bytes[..])
-                .context("Failed to deserialize confidential payload tuple")?;
+            Deserialize::tls_deserialize(&mut &confidential_bytes[..])?;
 
-        let deserialized_mls_message_in = MlsMessageIn::tls_deserialize(&mut &group_info_bytes[..])
-            .context("Failed to deserialize MlsMessageIn from decrypted payload")?;
+        let deserialized_mls_message_in =
+            MlsMessageIn::tls_deserialize(&mut &group_info_bytes[..])?;
 
         let verifiable_group_info = match deserialized_mls_message_in.extract() {
             MlsMessageBodyIn::GroupInfo(group_info) => group_info,
             _ => {
-                return Err(anyhow!(
-                    "Expected GroupInfo in MlsMessageIn, got different message type"
-                ));
+                return Err(CryptoIdentityActorError::MlsMessageInMissingGroupInfo);
             }
         };
 
@@ -623,28 +601,22 @@ impl CryptoIdentityActor {
                 self.crypto_provider.as_ref(),
                 verifiable_group_info,
                 self.credential_with_key.clone(),
-            )
-            .context("error building group")?
-            .load_psks(self.crypto_provider.as_ref().storage())
-            .context("error loading psks")?
+            )?
+            .load_psks(self.crypto_provider.as_ref().storage())?
             .build(
                 self.crypto_provider.rand(),
                 self.crypto_provider.crypto(),
                 self.signature_keypair.as_ref(),
                 |_| true,
-            )
-            .context("error building external commit")?
-            .finalize(self.crypto_provider.as_ref())
-            .context("error finalizing external commit")?;
+            )?
+            .finalize(self.crypto_provider.as_ref())?;
 
         // Extract the commit message that we will broadcast
         let (commit_message, _welcome, _group_info) = commit_message_bundle.into_contents();
 
         // Merge the pending commit to finalize our addition to the group
         // This applies the external commit to our local group state
-        new_group_to_join
-            .merge_pending_commit(self.crypto_provider.as_ref())
-            .context("Failed to self merge pending external commit")?;
+        new_group_to_join.merge_pending_commit(self.crypto_provider.as_ref())?;
 
         // Extract group name
         let group_name = match Self::extract_group_name(&new_group_to_join) {
@@ -666,13 +638,14 @@ impl CryptoIdentityActor {
         })
     }
 
-    fn create_user_announcement(&mut self) -> Result<CryptoIdentityReply> {
+    fn create_user_announcement(
+        &mut self,
+    ) -> Result<CryptoIdentityReply, CryptoIdentityActorError> {
         // Serialize the KeyPackage to bytes
         let key_package_bytes = self
             .mls_key_package_bundle
             .key_package()
-            .tls_serialize_detached()
-            .context("Failed to serialize key package")?;
+            .tls_serialize_detached()?;
         let user_announcement = crate::agora_chat::UserAnnouncement {
             username: self.username.clone(),
             tls_serialized_key_package: key_package_bytes,
@@ -692,15 +665,13 @@ impl CryptoIdentityActor {
     fn handle_new_user_announcement_inbound(
         &mut self,
         user_announcement: UserAnnouncement,
-    ) -> Result<CryptoIdentityReply> {
+    ) -> Result<CryptoIdentityReply, CryptoIdentityActorError> {
         // Deserialize the KeyPackage from the announcement
         let key_package_in =
-            KeyPackageIn::tls_deserialize(&mut &user_announcement.tls_serialized_key_package[..])
-                .context("Failed to deserialize KeyPackage from announcement")?;
+            KeyPackageIn::tls_deserialize(&mut &user_announcement.tls_serialized_key_package[..])?;
 
         let user_identity =
-            UserIdentity::from_key_package(&user_announcement.username, &key_package_in)
-                .context("Failed to create UserIdentity from KeyPackage")?;
+            UserIdentity::from_key_package(&user_announcement.username, &key_package_in)?;
 
         // Store in user cache
         self.user_cache.insert(user_identity, key_package_in);
@@ -710,14 +681,13 @@ impl CryptoIdentityActor {
         )))
     }
     /// Get safety number for current identity
-    fn generate_safety_number(&self) -> Result<SafetyNumber> {
+    fn generate_safety_number(&self) -> Result<SafetyNumber, CryptoIdentityActorError> {
         // Extract the public key from the signature keypair
         // The signature_keypair contains both private and public keys
         let public_key_bytes = self.signature_keypair.public();
 
         // Generate safety number using the public key
-        let safety_number = generate_safety_number(&public_key_bytes)
-            .context("Failed to generate safety number")?;
+        let safety_number = generate_safety_number(&public_key_bytes)?;
 
         Ok(safety_number)
     }
@@ -766,7 +736,7 @@ impl CryptoIdentityActor {
     /// # Errors
     /// * If the SSH key cannot be loaded
     /// * If MLS initialization fails
-    pub fn new(key_file_path: &Path, display_name: &str) -> Result<Self> {
+    pub fn new(key_file_path: &Path, display_name: &str) -> Result<Self, CryptoIdentityActorError> {
         // Step 1: Load SSH key
         let (signing_key, verifying_key) = Self::load_ssh_ed25519_key(key_file_path)?;
 
@@ -783,9 +753,7 @@ impl CryptoIdentityActor {
         );
 
         // Step 4: Store in KeyStore (stays within this actor)
-        signature_keypair
-            .store(provider.as_ref().storage())
-            .context("Failed to store signature keypair in OpenMLS KeyStore")?;
+        signature_keypair.store(provider.as_ref().storage())?;
 
         // Step 5: Create MLS credential
         let credential = BasicCredential::new(verifying_key.to_bytes().to_vec());
@@ -795,14 +763,12 @@ impl CryptoIdentityActor {
         };
 
         // Step 6: Build MLS key package
-        let mls_key_package_bundle = KeyPackage::builder()
-            .build(
-                ciphersuite,
-                provider.as_ref(),
-                &signature_keypair,
-                credential_with_key.clone(),
-            )
-            .context("Failed to create MLS key package")?;
+        let mls_key_package_bundle = KeyPackage::builder().build(
+            ciphersuite,
+            provider.as_ref(),
+            &signature_keypair,
+            credential_with_key.clone(),
+        )?;
 
         Ok(CryptoIdentityActor {
             ciphersuite,
@@ -833,10 +799,16 @@ impl CryptoIdentityActor {
     /// * If the key format is invalid or unsupported
     /// * If the key is encrypted but decryption fails
     /// * If the key is not an Ed25519 key
-    fn load_ssh_ed25519_key(key_path: &Path) -> Result<(SigningKey, VerifyingKey)> {
-        let expanded_path =
-            shellexpand::tilde(key_path.to_str().context("Expected to find the key file")?)
-                .to_string();
+    fn load_ssh_ed25519_key(
+        key_path: &Path,
+    ) -> Result<(SigningKey, VerifyingKey), CryptoIdentityActorError> {
+        let expanded_path = shellexpand::tilde(
+            key_path
+                .to_str()
+                .ok_or_else(|| CryptoIdentityActorError::KeyFileNotFound)?,
+        )
+        .to_string();
+
         let key_data = fs::read_to_string(expanded_path)?;
 
         let ssh_private_key = PrivateKey::from_openssh(&key_data)?;
@@ -852,9 +824,7 @@ impl CryptoIdentityActor {
             };
             // Note: The raw_passphrase String still existed briefly, but this minimizes the window
 
-            ssh_private_key
-                .decrypt(&passphrase)
-                .context("Failed to decrypt SSH private key (wrong passphrase?)")?
+            ssh_private_key.decrypt(&passphrase)?
         } else {
             ssh_private_key
         };
@@ -862,7 +832,7 @@ impl CryptoIdentityActor {
         let key_bytes = ssh_private_key_decrypted
             .key_data()
             .ed25519()
-            .context("SSH key is not Ed25519")?;
+            .ok_or_else(|| CryptoIdentityActorError::PrivateKeyDecryptionFailed)?;
 
         let signing_key = SigningKey::from_bytes(&key_bytes.private.to_bytes());
         let verifying_key = signing_key.verifying_key();
@@ -887,7 +857,10 @@ pub struct UserIdentity {
 
 impl UserIdentity {
     /// Create from username and KeyPackageIn
-    pub fn from_key_package(username: &str, key_package: &KeyPackageIn) -> anyhow::Result<Self> {
+    pub fn from_key_package(
+        username: &str,
+        key_package: &KeyPackageIn,
+    ) -> Result<Self, CryptoIdentityActorError> {
         let signature_key = key_package.unverified_credential().signature_key;
         let fingerprint = hex::encode(&signature_key.as_slice()[..4]);
         Ok(Self {
@@ -898,15 +871,12 @@ impl UserIdentity {
 }
 
 impl std::str::FromStr for UserIdentity {
-    type Err = anyhow::Error;
+    type Err = CryptoIdentityActorError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split('@').collect();
         if parts.len() != 2 {
-            return Err(anyhow!(
-                "Invalid identity format. Expected 'username@fingerprint', got '{}'",
-                s
-            ));
+            return Err(CryptoIdentityActorError::IncorrectUsernameFormat);
         }
         Ok(Self {
             username: parts[0].to_string(),

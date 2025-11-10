@@ -42,15 +42,71 @@ pub enum CryptoIdentityActorError {
     #[error("Protocol message conversion failure")]
     ProtocolMessageConversionFailed(#[from] openmls::framing::errors::ProtocolMessageError),
 
-    #[error("")]
-    //     #[error("Failed to add member")]
-    //     AddMemberFailed(#[from] AddMembersError<MemoryStorageError>),
+    #[error("Message processing failed")]
+    MessageProcessingFailed(#[from] openmls::group::ProcessMessageError<MemoryStorageError>),
 
-    //     #[error("Failed to merge staged commit {0}")]
-    //     MlsMergeCommitError(String),
+    #[error("UTF8 encoding failed")]
+    UtfEncodingFailed(#[from] std::string::FromUtf8Error),
 
-    //     #[error("Encryption failed: {0}")]
-    //     MessageEncryptionFailed(String),
+    #[error("Failed to merge staged commit")]
+    MergingStagedCommitFailed(#[from] openmls::group::MergeCommitError<MemoryStorageError>),
+
+    #[error("Unsupported message content type")]
+    UnsupportedMessageContentType,
+
+    #[error("Failed to validate key package")]
+    KeyPackageValidationFailed(#[from] openmls::prelude::KeyPackageVerifyError),
+
+    #[error("GroupInfo missing from MlsMessageIn")]
+    MlsMessageInMissingGroupInfo,
+
+    #[error("External commit build failed")]
+    ExternalCommitBuildFailed(
+        #[from] openmls::group::ExternalCommitBuilderError<MemoryStorageError>,
+    ),
+
+    #[error("Commit creation failed")]
+    CommitCreationFailed(#[from] openmls::group::CreateCommitError),
+
+    #[error("Unable to finalize commit")]
+    ExternalCommitFinalizedFailed(
+        #[from] openmls::group::ExternalCommitBuilderFinalizeError<MemoryStorageError>,
+    ),
+
+    #[error("Failed to generate safety number")]
+    SafetyNumberGenerationFailed(#[from] SafetyNumberError),
+
+    #[error("Unable to merge pending commit")]
+    MergePendingCommitFailed(#[from] openmls::group::MergePendingCommitError<MemoryStorageError>),
+
+    #[error("Unable to store signature keypair")]
+    SignatureKeypairStorageFailed(#[from] MemoryStorageError),
+
+    #[error("Unable to build key package bundle")]
+    KeyPackageBundleBuildFaile(#[from] openmls::prelude::KeyPackageNewError),
+
+    #[error("Unable to locate key file")]
+    KeyFileNotFound,
+
+    #[error("Unable to load key from file")]
+    KeyLoadFailed(#[from] std::io::Error),
+
+    #[error("Unable to extract private key")]
+    PrivateKeyExtractionFailed(#[from] ssh_key::Error),
+
+    #[error("Private key decryption failed")]
+    PrivateKeyDecryptionFailed,
+
+    #[error("Incorrect username format")]
+    IncorrectUsernameFormat,
+}
+
+#[derive(Error, Debug)]
+pub enum SafetyNumberError {
+    #[error("Public key is empty.")]
+    EmptyPublicKey,
+    #[error("Failed to generate safety number.")]
+    QrCodeGenerationFailed,
 }
 
 #[derive(Error, Debug)]
@@ -79,14 +135,6 @@ pub enum NetworkError {
 
     #[error("Network interface error: {interface} - {message}")]
     InterfaceError { interface: String, message: String },
-}
-
-#[derive(Error, Debug)]
-pub enum SafetyNumberError {
-    #[error("Public key is empty.")]
-    EmptyPublicKey,
-    #[error("Failed to generate safety number.")]
-    QrCodeGenerationFailed,
 }
 
 #[derive(Error, Debug)]
