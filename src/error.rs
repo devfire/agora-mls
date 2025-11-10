@@ -1,3 +1,5 @@
+use openmls::{group::NewGroupError, prelude::InvalidExtensionError};
+use openmls_rust_crypto::MemoryStorageError;
 use prost::DecodeError;
 use std::net::SocketAddr;
 use thiserror::Error;
@@ -10,14 +12,37 @@ pub enum OpenSSHKeyError {
 
 #[derive(Error, Debug)]
 pub enum CryptoIdentityActorError {
-    #[error("Group {0} not found")]
-    GroupNotFound(String),
-    //     #[error("Failed to set extensions {0}")]
-    //     ExtensionError(String),
+    #[error("Group not found")]
+    GroupNotFound,
 
-    //     #[error("Failed to create group: {0}")]
-    //     GroupCreationFailed(String),
+    #[error("User {0} not found")]
+    UserNotFound(String),
 
+    #[error("Failed to set extensions {0}")]
+    ExtensionError(InvalidExtensionError),
+
+    #[error("Failed to create new group")]
+    GroupCreationFailed(#[from] NewGroupError<MemoryStorageError>),
+
+    #[error("Failed to store new group")]
+    GroupStorageFailed,
+
+    #[error("Failed to export group")]
+    GroupExportFailed(#[from] openmls::group::ExportGroupInfoError),
+
+    #[error("Failed to tls serialize group")]
+    GroupTlsSerializationFailed(#[from] openmls::prelude::Error),
+
+    #[error("Failed to HPKE seal")]
+    HpkeSealFailed(#[from] openmls::prelude::CryptoError),
+
+    #[error("Failed to create message")]
+    MessageCreationFailed(#[from] openmls::group::CreateMessageError),
+
+    #[error("Protocol message conversion failure")]
+    ProtocolMessageConversionFailed(#[from] openmls::framing::errors::ProtocolMessageError),
+
+    #[error("")]
     //     #[error("Failed to add member")]
     //     AddMemberFailed(#[from] AddMembersError<MemoryStorageError>),
 
