@@ -5,12 +5,16 @@ use clap::{Parser, Subcommand};
 use crate::crypto_identity_actor::{CryptoIdentityMessage, UserIdentity};
 
 // rustyline completer
-use rustyline::completion::{Completer, Pair};
 use rustyline::Context;
-use rustyline::hint::Hinter;
-use rustyline::highlight::Highlighter;
-use rustyline::validate::Validator;
 use rustyline::Helper;
+use rustyline::completion::{Completer, Pair};
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::validate::Validator;
+
+// needed to auto-populate the tab completion
+use strum::IntoEnumIterator;
+use strum_macros::{EnumIter, IntoStaticStr};
 
 #[derive(Parser, Debug)]
 #[command(disable_help_flag = true)]
@@ -20,7 +24,8 @@ pub struct CommandWrapper {
     #[command(subcommand)]
     pub command: Command,
 }
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, EnumIter, IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
 pub enum Command {
     /// Join a channel
     Invite {
@@ -129,13 +134,15 @@ impl Command {
             Command::CreateGroup { group_name: name } => Some(CryptoIdentityMessage::CreateGroup {
                 group_name: name.clone(),
             }),
-            Command::Invite { nick, group_name: group } => nick
-                .parse::<UserIdentity>()
-                .ok()
-                .map(|user_identity| CryptoIdentityMessage::InviteUser {
+            Command::Invite {
+                nick,
+                group_name: group,
+            } => nick.parse::<UserIdentity>().ok().map(|user_identity| {
+                CryptoIdentityMessage::InviteUser {
                     user_identity,
                     group_name: group.clone(),
-                }),
+                }
+            }),
             Command::Groups => Some(CryptoIdentityMessage::ListGroups),
             Command::Users => Some(CryptoIdentityMessage::ListUsers),
             Command::Announce => Some(CryptoIdentityMessage::CreateAnnouncement),
@@ -146,28 +153,23 @@ impl Command {
     }
 }
 
-
 pub struct CommandCompleter;
 
 impl CommandCompleter {
-    /// Get all available command names
+    /// Get all available command names, automatically derived.
     pub fn get_commands() -> Vec<&'static str> {
-        vec![
-            "invite",
-            "leave",
-            "msg",
-            "create-group",
-            "users",
-            "groups",
-            "group",
-            "safety",
-            "announce",
-            "quit",
-            "q",
-        ]
+        let mut commands: Vec<&'static str> = Command::iter()
+            .map(|cmd| {
+                let name: &'static str = cmd.into();
+                name
+            })
+            .collect();
+
+        // Add the alias for Quit
+        commands.push("q");
+        commands
     }
 }
-
 impl Completer for CommandCompleter {
     type Candidate = Pair;
 
@@ -212,7 +214,7 @@ impl Hinter for CommandCompleter {
         }
 
         let input = &line[1..];
-        
+
         // Find the first command that starts with the input
         for cmd in Self::get_commands() {
             if cmd.starts_with(input) && cmd.len() > input.len() {

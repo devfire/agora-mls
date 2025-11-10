@@ -5,14 +5,14 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
-clap = { version = "4.5.48", features = ["derive"] }
+clap = { version = "4.5.51", features = ["derive"] }
 ed25519 = { version = "2.2.3", features = ["pkcs8"] }
 ed25519-dalek = { version = "2.2.0", features = ["signature"] }
 hex = "0.4.3"
 kameo = "0.18.0"
-openmls = "0.7.0"
-openmls_basic_credential = "0.4.0"
-openmls_rust_crypto = "0.4.0"
+openmls = "0.7.1"
+openmls_basic_credential = "0.4.1"
+openmls_rust_crypto = "0.4.1"
 parking_lot = "0.12.5"
 pem = "3.0.6"
 pkcs8 = "0.10.2"
@@ -20,19 +20,21 @@ prost = "0.14.1"
 qrcode = "0.14.1"
 rcgen = "0.14.5"
 rpassword = "7.4.0"
-rustyline = "17.0.1"
+rustyline = "17.0.2"
 sha2 = "0.10.9"
 shell-words = "1.1.0"
 shellexpand = "3.1.1"
-socket2 = "0.6.0"
+socket2 = "0.6.1"
 ssh-key = { version = "0.6.7", features = ["ed25519", "encryption"] }
-thiserror = "2.0.16"
-tokio = { version = "1.47.1", features = ["full"] }
+strum = "0.27.2"
+strum_macros = "0.27.2"
+thiserror = "2.0.17"
+tokio = { version = "1.48.0", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 uuid = { version = "1.18.1", features = ["v4"] }
 x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
-zeroize = "1.8.1"
+zeroize = "1.8.2"
 
 # Dependencies ONLY for the build.rs script
 [build-dependencies]

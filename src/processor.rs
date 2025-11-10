@@ -162,6 +162,7 @@ impl Processor {
                         // end of if line.starts_with('/')
                         else {
                             // not a command, we need to encrypt & ship the msg
+                            // this goes to ui_input_handler_task
                             if message_sender.blocking_send(line).is_err() {
                                 error!(
                                     "Failed to send message: spawn_message_handler_task receiver has been dropped."
@@ -184,11 +185,10 @@ impl Processor {
     }
 
     /// Spawn a task to handle messages from stdin and forward them to the network manager.
-    pub fn spawn_ui_input_handler_task(
+    pub fn ui_input_handler_task(
         &self,
         crypto_actor: ActorRef<CryptoIdentityActor>,
         mut receiver: tokio::sync::mpsc::Receiver<String>,
-        message_sender: tokio::sync::mpsc::Sender<String>,
         display_sender: tokio::sync::mpsc::Sender<String>,
     ) -> tokio::task::JoinHandle<()> {
         let network_manager = self.network_manager.clone();
@@ -208,11 +208,12 @@ impl Processor {
 
                 // Check if we have a group outside the lock scope
                 let group_name = if let Some(name) = group_name {
+                    debug!("Currently selected group is {name}");
                     name
                 } else {
                     let err_msg = "No active group selected. Use /group <group_name> to select a group before sending messages.";
 
-                    if let Err(e) = message_sender.send(err_msg.to_string()).await {
+                    if let Err(e) = display_sender.send(err_msg.to_string()).await {
                         error!("Unable to send an update from spawn_ui_input_handler_task {e}.");
                     }
                     continue;
