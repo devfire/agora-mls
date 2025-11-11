@@ -279,31 +279,42 @@ impl Processor {
                 }
 
                 // OK, now we can proceed.
-                if let Some(c) = command.to_crypto_message() {
-                    // Forward the command to the state actor and await the reply
-                    match crypto_actor.ask(c).await {
-                        Ok(reply) => {
-                            if let Err(e) = Self::handle_crypto_identity_reply(
-                                reply,
-                                &display_sender,
-                                &network_manager,
-                                &current_group,
-                            )
-                            .await
-                            {
-                                debug!("Failed to handle crypto identity reply: {}", e);
-                                display_sender
-                                    .send(format!("{e}"))
-                                    .await
-                                    .unwrap_or_else(|e| {
-                                        error!("Unable to send the msg to display: {e}")
-                                    });
+                match command.to_crypto_message() {
+                    Ok(crypto_message) => {
+                        debug!("Passing {crypto_message} to crypto actor");
+                        // Forward the command to the state actor and await the reply
+                        match crypto_actor.ask(crypto_message).await {
+                            Ok(reply) => {
+                                debug!("Crypto actor replied with: {}", reply);
+                                if let Err(e) = Self::handle_crypto_identity_reply(
+                                    reply,
+                                    &display_sender,
+                                    &network_manager,
+                                    &current_group,
+                                )
+                                .await
+                                {
+                                    debug!("Failed to handle crypto identity reply: {}", e);
+                                    display_sender
+                                        .send(format!("{e}"))
+                                        .await
+                                        .unwrap_or_else(|e| {
+                                            error!("Unable to send the msg to display: {e}")
+                                        });
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to send command to state actor: {}", e);
+                                break;
                             }
                         }
-                        Err(e) => {
-                            error!("Failed to send command to state actor: {}", e);
-                            break;
-                        }
+                    }
+                    Err(e) => {
+                        debug!("{:?} is not a valid crypto command: {}", command, e);
+                        display_sender
+                            .send(format!("Invalid command or its parameters: {}", e))
+                            .await
+                            .unwrap_or_else(|e| error!("Unable to send msg to display: {e}"));
                     }
                 }
             }

@@ -1,3 +1,4 @@
+
 use openmls::{group::NewGroupError, prelude::InvalidExtensionError};
 use openmls_rust_crypto::MemoryStorageError;
 use prost::DecodeError;
@@ -8,6 +9,16 @@ use thiserror::Error;
 pub enum OpenSSHKeyError {
     #[error("Failed to read SSH key file: {ssh_key_file_path}")]
     MissingSshKeyFile { ssh_key_file_path: String },
+}
+
+
+#[derive(Error, Debug)]
+pub enum CommandError {
+    #[error("Nick parsing failed, are you missing the @ sign?")]
+    NickParsingFailed(#[from] CryptoIdentityActorError),
+
+    #[error("Not a crypto command")]
+    NotACryptoCommand,
 }
 
 #[derive(Error, Debug)]

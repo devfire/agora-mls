@@ -3,6 +3,7 @@
 use clap::{Parser, Subcommand};
 
 use crate::crypto_identity_actor::{CryptoIdentityMessage, UserIdentity};
+use crate::error::CommandError;
 
 // rustyline completer
 use rustyline::Context;
@@ -129,26 +130,28 @@ impl Command {
 
 // In src/command.rs
 impl Command {
-    pub fn to_crypto_message(&self) -> Option<CryptoIdentityMessage> {
+    pub fn to_crypto_message(&self) -> Result<CryptoIdentityMessage, CommandError> {
         match self {
-            Command::CreateGroup { group_name: name } => Some(CryptoIdentityMessage::CreateGroup {
+            Command::CreateGroup { group_name: name } => Ok(CryptoIdentityMessage::CreateGroup {
                 group_name: name.clone(),
             }),
             Command::Invite {
                 nick,
                 group_name: group,
-            } => nick.parse::<UserIdentity>().ok().map(|user_identity| {
-                CryptoIdentityMessage::InviteUser {
+            } => {
+                // Parse the nick as UserIdentity and handle the Result properly
+                let user_identity = nick.parse::<UserIdentity>()?;
+                Ok(CryptoIdentityMessage::InviteUser {
                     user_identity,
                     group_name: group.clone(),
-                }
-            }),
-            Command::Groups => Some(CryptoIdentityMessage::ListGroups),
-            Command::Users => Some(CryptoIdentityMessage::ListUsers),
-            Command::Announce => Some(CryptoIdentityMessage::CreateAnnouncement),
-            Command::Safety => Some(CryptoIdentityMessage::GetSafetyNumber),
-            // Non-crypto commands return None
-            _ => None,
+                })
+            },
+            Command::Groups => Ok(CryptoIdentityMessage::ListGroups),
+            Command::Users => Ok(CryptoIdentityMessage::ListUsers),
+            Command::Announce => Ok(CryptoIdentityMessage::CreateAnnouncement),
+            Command::Safety => Ok(CryptoIdentityMessage::GetSafetyNumber),
+            // Non-crypto commands return an error
+            _ => Err(CommandError::NotACryptoCommand),
         }
     }
 }

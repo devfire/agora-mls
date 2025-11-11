@@ -13,6 +13,7 @@ use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::{OpenMlsRustCrypto, RustCrypto};
 use ssh_key::PrivateKey;
 
+use strum_macros::Display;
 use tracing::debug;
 
 use zeroize::Zeroizing;
@@ -52,7 +53,7 @@ pub struct CryptoIdentityActor {
 // MESSAGE TYPES - Single enum pattern for cleaner API
 // ============================================================================
 
-#[derive(Debug)]
+#[derive(Debug, Display)]
 pub enum CryptoIdentityMessage {
     // === MLS Group Operations ===
     /// Create a new MLS group
@@ -105,7 +106,7 @@ pub enum CryptoIdentityMessage {
     GetSafetyNumber,
 }
 
-#[derive(Reply)]
+#[derive(Reply, Display)]
 pub enum CryptoIdentityReply {
     // === MLS Operation Replies ===
     /// Group created successfully
@@ -215,7 +216,7 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                 user_identity,
                 group_name,
             } => self
-                .handle_invite_user(user_identity, &group_name)
+                .send_invite_to_external_user(user_identity, &group_name)
                 .unwrap_or_else(CryptoIdentityReply::Failure),
 
             CryptoIdentityMessage::CreateAnnouncement => self
@@ -509,7 +510,7 @@ impl CryptoIdentityActor {
     }
 
     /// Handle the new user invite request
-    fn handle_invite_user(
+    fn send_invite_to_external_user(
         &mut self,
         user_identity: UserIdentity,
         group_name: &str,
@@ -520,7 +521,7 @@ impl CryptoIdentityActor {
         let key_package_in = self
             .user_cache
             .get(&user_identity)
-            .ok_or_else(|| CryptoIdentityActorError::UserNotFound(group_name.to_string()))?;
+            .ok_or_else(|| CryptoIdentityActorError::UserNotFound(user_identity.username))?;
 
         // Validate the KeyPackageIn
         let validated_keypackage = key_package_in
