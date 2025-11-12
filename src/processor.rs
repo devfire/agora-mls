@@ -269,15 +269,6 @@ impl Processor {
             while let Some(command) = receiver.recv().await {
                 debug!("Command handler received command: {:?}", command);
 
-                // Update local state for UI when switching groups or creating a group
-                if let Command::Group { ref group_name } | Command::CreateGroup { ref group_name } =
-                    command
-                {
-                    let mut group = current_group.lock();
-                    *group = Some(group_name.clone());
-                    println!("\x1b[32m✓ Switched to group: {}\x1b[0m", group_name);
-                }
-
                 // OK, now we can proceed.
                 match command.to_crypto_message() {
                     Ok(crypto_message) => {
@@ -294,6 +285,7 @@ impl Processor {
                                 )
                                 .await
                                 {
+                                    // we got an error back, display it and bail
                                     debug!("Failed to handle crypto identity reply: {}", e);
                                     display_sender
                                         .send(format!("{e}"))
@@ -301,6 +293,20 @@ impl Processor {
                                         .unwrap_or_else(|e| {
                                             error!("Unable to send the msg to display: {e}")
                                         });
+                                    continue;
+                                } else {
+                                    // No errors - party!
+                                    // Update local state for UI when switching groups or creating a group
+                                    if let Command::Group { ref group_name }
+                                    | Command::CreateGroup { ref group_name } = command
+                                    {
+                                        let mut group = current_group.lock();
+                                        *group = Some(group_name.clone());
+                                        println!(
+                                            "\x1b[32m✓ Switched to group: {}\x1b[0m",
+                                            group_name
+                                        );
+                                    }
                                 }
                             }
                             Err(e) => {

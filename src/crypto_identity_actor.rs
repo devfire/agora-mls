@@ -268,7 +268,7 @@ impl CryptoIdentityActor {
         debug!("Creating group {group_name}");
         // First check if the group already exists
         if self.group_name_to_id.contains_key(&group_name) {
-            return Err(CryptoIdentityActorError::GroupNotFound);
+            return Err(CryptoIdentityActorError::GroupAlreadyExists);
         }
         const GROUP_NAME_EXTENSION_ID: u16 = 13;
 
@@ -675,10 +675,13 @@ impl CryptoIdentityActor {
             UserIdentity::from_key_package(&user_announcement.username, &key_package_in)?;
 
         // Store in user cache
-        self.user_cache.insert(user_identity, key_package_in);
+        // Unfortunately need to clone() here because we need to ship the user_identity as part of the Success message
+        self.user_cache
+            .insert(user_identity.clone(), key_package_in);
+
         Ok(CryptoIdentityReply::Success(format!(
             "New user {} added.",
-            user_announcement.username
+            user_identity
         )))
     }
     /// Get safety number for current identity

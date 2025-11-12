@@ -1,4 +1,3 @@
-
 use openmls::{group::NewGroupError, prelude::InvalidExtensionError};
 use openmls_rust_crypto::MemoryStorageError;
 use prost::DecodeError;
@@ -10,7 +9,6 @@ pub enum OpenSSHKeyError {
     #[error("Failed to read SSH key file: {ssh_key_file_path}")]
     MissingSshKeyFile { ssh_key_file_path: String },
 }
-
 
 #[derive(Error, Debug)]
 pub enum CommandError {
@@ -25,6 +23,9 @@ pub enum CommandError {
 pub enum CryptoIdentityActorError {
     #[error("Group not found")]
     GroupNotFound,
+
+    #[error("Group already exists")]
+    GroupAlreadyExists,
 
     #[error("User {0} not found")]
     UserNotFound(String),
