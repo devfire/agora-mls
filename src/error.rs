@@ -1,3 +1,5 @@
+use openmls::{group::NewGroupError, prelude::InvalidExtensionError};
+use openmls_rust_crypto::MemoryStorageError;
 use prost::DecodeError;
 use std::net::SocketAddr;
 use thiserror::Error;
@@ -9,23 +11,114 @@ pub enum OpenSSHKeyError {
 }
 
 #[derive(Error, Debug)]
+pub enum CommandError {
+    #[error("Nick parsing failed, are you missing the @ sign?")]
+    NickParsingFailed(#[from] CryptoIdentityActorError),
+
+    #[error("Not a crypto command")]
+    NotACryptoCommand,
+}
+
+#[derive(Error, Debug)]
 pub enum CryptoIdentityActorError {
-    #[error("Group {0} not found")]
-    GroupNotFound(String),
-    //     #[error("Failed to set extensions {0}")]
-    //     ExtensionError(String),
+    #[error("Group not found")]
+    GroupNotFound,
 
-    //     #[error("Failed to create group: {0}")]
-    //     GroupCreationFailed(String),
+    #[error("Group already exists")]
+    GroupAlreadyExists,
 
-    //     #[error("Failed to add member")]
-    //     AddMemberFailed(#[from] AddMembersError<MemoryStorageError>),
+    #[error("User {0} not found")]
+    UserNotFound(String),
 
-    //     #[error("Failed to merge staged commit {0}")]
-    //     MlsMergeCommitError(String),
+    #[error("Failed to set extensions {0}")]
+    ExtensionError(InvalidExtensionError),
 
-    //     #[error("Encryption failed: {0}")]
-    //     MessageEncryptionFailed(String),
+    #[error("Failed to create new group")]
+    GroupCreationFailed(#[from] NewGroupError<MemoryStorageError>),
+
+    #[error("Failed to store new group")]
+    GroupStorageFailed,
+
+    #[error("Failed to export group")]
+    GroupExportFailed(#[from] openmls::group::ExportGroupInfoError),
+
+    #[error("Failed to tls serialize group")]
+    GroupTlsSerializationFailed(#[from] openmls::prelude::Error),
+
+    #[error("Failed to HPKE seal")]
+    HpkeSealFailed(#[from] openmls::prelude::CryptoError),
+
+    #[error("Failed to create message")]
+    MessageCreationFailed(#[from] openmls::group::CreateMessageError),
+
+    #[error("Protocol message conversion failure")]
+    ProtocolMessageConversionFailed(#[from] openmls::framing::errors::ProtocolMessageError),
+
+    #[error("Message processing failed")]
+    MessageProcessingFailed(#[from] openmls::group::ProcessMessageError<MemoryStorageError>),
+
+    #[error("UTF8 encoding failed")]
+    UtfEncodingFailed(#[from] std::string::FromUtf8Error),
+
+    #[error("Failed to merge staged commit")]
+    MergingStagedCommitFailed(#[from] openmls::group::MergeCommitError<MemoryStorageError>),
+
+    #[error("Unsupported message content type")]
+    UnsupportedMessageContentType,
+
+    #[error("Failed to validate key package")]
+    KeyPackageValidationFailed(#[from] openmls::prelude::KeyPackageVerifyError),
+
+    #[error("GroupInfo missing from MlsMessageIn")]
+    MlsMessageInMissingGroupInfo,
+
+    #[error("External commit build failed")]
+    ExternalCommitBuildFailed(
+        #[from] openmls::group::ExternalCommitBuilderError<MemoryStorageError>,
+    ),
+
+    #[error("Commit creation failed")]
+    CommitCreationFailed(#[from] openmls::group::CreateCommitError),
+
+    #[error("Unable to finalize commit")]
+    ExternalCommitFinalizedFailed(
+        #[from] openmls::group::ExternalCommitBuilderFinalizeError<MemoryStorageError>,
+    ),
+
+    #[error("Failed to generate safety number")]
+    SafetyNumberGenerationFailed(#[from] SafetyNumberError),
+
+    #[error("Unable to merge pending commit")]
+    MergePendingCommitFailed(#[from] openmls::group::MergePendingCommitError<MemoryStorageError>),
+
+    #[error("Unable to store signature keypair")]
+    SignatureKeypairStorageFailed(#[from] MemoryStorageError),
+
+    #[error("Unable to build key package bundle")]
+    KeyPackageBundleBuildFaile(#[from] openmls::prelude::KeyPackageNewError),
+
+    #[error("Unable to locate key file")]
+    KeyFileNotFound,
+
+    #[error("Unable to load key from file")]
+    KeyLoadFailed(#[from] std::io::Error),
+
+    #[error("Unable to extract private key")]
+    PrivateKeyExtractionFailed(#[from] ssh_key::Error),
+
+    #[error("Private key decryption failed")]
+    PrivateKeyDecryptionFailed,
+
+    #[error("Incorrect username format")]
+    IncorrectUsernameFormat,
+}
+
+#[derive(Error, Debug)]
+pub enum SafetyNumberError {
+    #[error("Public key is empty.")]
+    EmptyPublicKey,
+    #[error("Failed to generate safety number.")]
+    QrCodeGenerationFailed,
 }
 
 #[derive(Error, Debug)]
@@ -54,14 +147,6 @@ pub enum NetworkError {
 
     #[error("Network interface error: {interface} - {message}")]
     InterfaceError { interface: String, message: String },
-}
-
-#[derive(Error, Debug)]
-pub enum SafetyNumberError {
-    #[error("Public key is empty.")]
-    EmptyPublicKey,
-    #[error("Failed to generate safety number.")]
-    QrCodeGenerationFailed,
 }
 
 #[derive(Error, Debug)]

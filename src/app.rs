@@ -65,10 +65,9 @@ impl App {
             display_sender.clone(),
         );
 
-        let message_handle = processor.spawn_ui_input_handler_task(
+        let message_handle = processor.ui_input_handler_task(
             crypto_identity_ref.clone(),
             message_receiver,
-            message_sender.clone(),
             display_sender.clone(),
         );
 

@@ -3,14 +3,19 @@
 use clap::{Parser, Subcommand};
 
 use crate::crypto_identity_actor::{CryptoIdentityMessage, UserIdentity};
+use crate::error::CommandError;
 
 // rustyline completer
-use rustyline::completion::{Completer, Pair};
 use rustyline::Context;
-use rustyline::hint::Hinter;
-use rustyline::highlight::Highlighter;
-use rustyline::validate::Validator;
 use rustyline::Helper;
+use rustyline::completion::{Completer, Pair};
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::validate::Validator;
+
+// needed to auto-populate the tab completion
+use strum::IntoEnumIterator;
+use strum_macros::{EnumIter, IntoStaticStr};
 
 #[derive(Parser, Debug)]
 #[command(disable_help_flag = true)]
@@ -20,7 +25,8 @@ pub struct CommandWrapper {
     #[command(subcommand)]
     pub command: Command,
 }
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, EnumIter, IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
 pub enum Command {
     /// Join a channel
     Invite {
@@ -47,7 +53,7 @@ pub enum Command {
     /// Create a new group
     CreateGroup {
         /// New group name
-        name: String,
+        group_name: String,
     },
     /// List known users
     Users,
@@ -58,7 +64,7 @@ pub enum Command {
     /// Switch to a different group
     Group {
         /// Group name to switch to
-        name: String,
+        group_name: String,
     },
 
     /// Generate the safety number for the current identity
@@ -124,49 +130,49 @@ impl Command {
 
 // In src/command.rs
 impl Command {
-    pub fn to_crypto_message(&self) -> Option<CryptoIdentityMessage> {
+    pub fn to_crypto_message(&self) -> Result<CryptoIdentityMessage, CommandError> {
         match self {
-            Command::CreateGroup { name } => Some(CryptoIdentityMessage::CreateGroup {
+            Command::CreateGroup { group_name: name } => Ok(CryptoIdentityMessage::CreateGroup {
                 group_name: name.clone(),
             }),
-            Command::Invite { nick, group_name: group } => nick
-                .parse::<UserIdentity>()
-                .ok()
-                .map(|user_identity| CryptoIdentityMessage::InviteUser {
+            Command::Invite {
+                nick,
+                group_name: group,
+            } => {
+                // Parse the nick as UserIdentity and handle the Result properly
+                let user_identity = nick.parse::<UserIdentity>()?;
+                Ok(CryptoIdentityMessage::InviteUser {
                     user_identity,
                     group_name: group.clone(),
-                }),
-            Command::Groups => Some(CryptoIdentityMessage::ListGroups),
-            Command::Users => Some(CryptoIdentityMessage::ListUsers),
-            Command::Announce => Some(CryptoIdentityMessage::CreateAnnouncement),
-            // Non-crypto commands return None
-            _ => None,
+                })
+            },
+            Command::Groups => Ok(CryptoIdentityMessage::ListGroups),
+            Command::Users => Ok(CryptoIdentityMessage::ListUsers),
+            Command::Announce => Ok(CryptoIdentityMessage::CreateAnnouncement),
+            Command::Safety => Ok(CryptoIdentityMessage::GetSafetyNumber),
+            // Non-crypto commands return an error
+            _ => Err(CommandError::NotACryptoCommand),
         }
     }
 }
 
-
 pub struct CommandCompleter;
 
 impl CommandCompleter {
-    /// Get all available command names
+    /// Get all available command names, automatically derived.
     pub fn get_commands() -> Vec<&'static str> {
-        vec![
-            "invite",
-            "leave",
-            "msg",
-            "create-group",
-            "users",
-            "groups",
-            "group",
-            "safety",
-            "announce",
-            "quit",
-            "q",
-        ]
+        let mut commands: Vec<&'static str> = Command::iter()
+            .map(|cmd| {
+                let name: &'static str = cmd.into();
+                name
+            })
+            .collect();
+
+        // Add the alias for Quit
+        commands.push("q");
+        commands
     }
 }
-
 impl Completer for CommandCompleter {
     type Candidate = Pair;
 
@@ -211,7 +217,7 @@ impl Hinter for CommandCompleter {
         }
 
         let input = &line[1..];
-        
+
         // Find the first command that starts with the input
         for cmd in Self::get_commands() {
             if cmd.starts_with(input) && cmd.len() > input.len() {

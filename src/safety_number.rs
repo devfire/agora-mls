@@ -1,4 +1,3 @@
-use ed25519_dalek::VerifyingKey;
 use sha2::{Digest, Sha256};
 
 use crate::error::SafetyNumberError;
@@ -29,18 +28,17 @@ impl std::fmt::Display for SafetyNumber {
 /// This function hashes the public key within the credential to create a stable,
 /// verifiable fingerprint for out-of-band authentication.
 pub fn generate_safety_number(
-    public_key: &VerifyingKey,
+    public_key: &[u8],
 ) -> Result<SafetyNumber, SafetyNumberError> {
-    // Convert the public key to bytes
-    let public_key_bytes = public_key.to_bytes();
 
-    if public_key_bytes.is_empty() {
+    // Can't be empty, obv.
+    if public_key.is_empty() {
         return Err(SafetyNumberError::EmptyPublicKey);
     }
 
     // Hash the public key using SHA-256.
     let mut hasher = Sha256::new();
-    hasher.update(public_key_bytes);
+    hasher.update(public_key);
     let hash_result = hasher.finalize();
 
     // 3. Encode the hash into human-readable formats.
