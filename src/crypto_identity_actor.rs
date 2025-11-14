@@ -61,6 +61,11 @@ pub enum CryptoIdentityMessage {
         group_name: String,
     },
 
+    /// Check if a group exists
+    SwitchGroup {
+        group_name: String,
+    },
+
     /// Add a member to the current active group
     InviteMemberToGroup {
         key_package: KeyPackage,
@@ -111,6 +116,9 @@ pub enum CryptoIdentityReply {
     // === MLS Operation Replies ===
     /// Group created successfully
     GroupCreated(String),
+
+    /// Group existence check result
+    GroupSwitched { group_name: String },
 
     /// HPKE-encrypted GroupInfo for external commit join
     EncryptedGroupInfoForExternalInvite {
@@ -180,25 +188,21 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
                 self.handle_create_group(group_name)
                     .unwrap_or_else(CryptoIdentityReply::Failure)
             }
-
             CryptoIdentityMessage::InviteMemberToGroup {
                 key_package,
                 group_name,
             } => self
                 .invite_new_member_to_group(key_package, &group_name)
                 .unwrap_or_else(CryptoIdentityReply::Failure),
-
             CryptoIdentityMessage::EncryptMessage {
                 plaintext,
                 group_name,
             } => self
                 .handle_encrypt_message(plaintext, &group_name)
                 .unwrap_or_else(CryptoIdentityReply::Failure),
-
             CryptoIdentityMessage::ProcessMessage { mls_message_in } => self
                 .handle_mls_message(mls_message_in)
                 .unwrap_or_else(CryptoIdentityReply::Failure),
-
             CryptoIdentityMessage::ListGroups =>
             // 1. Get list of group IDs
             // 2. Fetch the corresponding MlsGroup references from the HashMap
@@ -218,15 +222,12 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
             } => self
                 .send_invite_to_external_user(user_identity, &group_name)
                 .unwrap_or_else(CryptoIdentityReply::Failure),
-
             CryptoIdentityMessage::CreateAnnouncement => self
                 .create_user_announcement()
                 .unwrap_or_else(CryptoIdentityReply::Failure),
-
             CryptoIdentityMessage::AddNewUser { user_announcement } => self
                 .handle_new_user_announcement_inbound(user_announcement)
                 .unwrap_or_else(CryptoIdentityReply::Failure),
-
             CryptoIdentityMessage::ListUsers => {
                 let users: Vec<String> = self
                     .user_cache
@@ -240,14 +241,18 @@ impl Message<CryptoIdentityMessage> for CryptoIdentityActor {
             } => self
                 .handle_encrypted_group_info(encrypted_group_info)
                 .unwrap_or_else(|e| CryptoIdentityReply::Failure(e)),
-
-            // The .map() approach transforms Result<SafetyNumber, Error> into Result<CryptoIdentityReply, Error>, then unwrap_or_else can work as before.
-            // This pattern applies to any arm where the function returns something other than Result<CryptoIdentityReply, _>
-            // we need to .map() the success value into the reply type first.
             CryptoIdentityMessage::GetSafetyNumber => self
                 .generate_safety_number()
                 .map(CryptoIdentityReply::SafetyNumber)
                 .unwrap_or_else(CryptoIdentityReply::Failure),
+            CryptoIdentityMessage::SwitchGroup { group_name } => {
+                // Check if group exists
+                if self.group_name_to_id.contains_key(&group_name) {
+                    CryptoIdentityReply::GroupSwitched { group_name }
+                } else {
+                    CryptoIdentityReply::Failure(CryptoIdentityActorError::GroupNotFound)
+                }
+            }
         }
     }
 }
