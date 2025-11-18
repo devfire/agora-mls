@@ -150,13 +150,6 @@ impl Processor {
                                     }
                                 }
                                 Err(_) => {
-                                    // if e.kind() == clap::error::ErrorKind::DisplayHelp {
-                                    //     Command::show_custom_help();
-                                    // } else {
-                                    //     error!("Command processing failed with {e}");
-                                    //     continue;
-                                    // }
-
                                     Command::show_custom_help();
                                 }
                             }
