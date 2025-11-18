@@ -84,7 +84,7 @@ impl Command {
         let args = shell_words::split(&input[1..]).map_err(|e| {
             clap::Error::raw(
                 clap::error::ErrorKind::InvalidValue,
-                format!("Shell parsing error: {}", e),
+                format!("Parsing error: {}", e),
             )
         })?;
 
@@ -145,11 +145,14 @@ impl Command {
                     user_identity,
                     group_name: group.clone(),
                 })
-            },
+            }
             Command::Groups => Ok(CryptoIdentityMessage::ListGroups),
             Command::Users => Ok(CryptoIdentityMessage::ListUsers),
             Command::Announce => Ok(CryptoIdentityMessage::CreateAnnouncement),
             Command::Safety => Ok(CryptoIdentityMessage::GetSafetyNumber),
+            Command::Group { group_name } => Ok(CryptoIdentityMessage::SwitchGroup {
+                group_name: group_name.clone(),
+            }),
             // Non-crypto commands return an error
             _ => Err(CommandError::NotACryptoCommand),
         }

@@ -149,13 +149,8 @@ impl Processor {
                                         break;
                                     }
                                 }
-                                Err(e) => {
-                                    if e.kind() == clap::error::ErrorKind::DisplayHelp {
-                                        Command::show_custom_help();
-                                    } else {
-                                        error!("Command processing failed with {e}");
-                                        continue;
-                                    }
+                                Err(_) => {
+                                    Command::show_custom_help();
                                 }
                             }
                         }
@@ -269,7 +264,7 @@ impl Processor {
             while let Some(command) = receiver.recv().await {
                 debug!("Command handler received command: {:?}", command);
 
-                // OK, now we can proceed.
+                // OK, now we can proceed with the crypto stuff.
                 match command.to_crypto_message() {
                     Ok(crypto_message) => {
                         debug!("Passing {crypto_message} to crypto actor");
@@ -296,17 +291,6 @@ impl Processor {
                                     continue;
                                 } else {
                                     // No errors - party!
-                                    // Update local state for UI when switching groups or creating a group
-                                    if let Command::Group { ref group_name }
-                                    | Command::CreateGroup { ref group_name } = command
-                                    {
-                                        let mut group = current_group.lock();
-                                        *group = Some(group_name.clone());
-                                        println!(
-                                            "\x1b[32m✓ Switched to group: {}\x1b[0m",
-                                            group_name
-                                        );
-                                    }
                                 }
                             }
                             Err(e) => {
@@ -562,6 +546,12 @@ impl Processor {
                 display_sender
                     .send(format!("Group {group_name} created"))
                     .await?;
+                // Update local state for UI when switching groups or creating a group
+                {
+                    let mut group = current_group.lock();
+                    *group = Some(group_name.clone());
+                    println!("\x1b[32m✓ Switched to group: {}\x1b[0m", group_name);
+                }
                 Ok(())
             }
             CryptoIdentityReply::EncryptedGroupInfoForExternalInvite {
@@ -638,7 +628,6 @@ impl Processor {
                     .await?;
                 Ok(())
             }
-
             CryptoIdentityReply::ExternalCommitCreated {
                 commit_message,
                 group_name,
@@ -661,6 +650,20 @@ impl Processor {
             CryptoIdentityReply::SafetyNumber(safety_number) => {
                 display_sender
                     .send(format!("Your safety number:\n{}", safety_number))
+                    .await?;
+                Ok(())
+            }
+            CryptoIdentityReply::GroupSwitched { group_name } => {
+                // Update local state for UI
+                {
+                    let mut group = current_group.lock();
+                    *group = Some(group_name.clone());
+                }
+                display_sender
+                    .send(format!(
+                        "\x1b[32m✓ Switched to group: {}\x1b[0m",
+                        group_name
+                    ))
                     .await?;
                 Ok(())
             }
