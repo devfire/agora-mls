@@ -141,6 +141,10 @@ impl Processor {
                                 Ok(c) => {
                                     debug!("Command entered: {:?}", c);
 
+                                    if let Command::Quit = c {
+                                        break;
+                                    }
+
                                     // Use blocking_send since we're in a blocking context
                                     if command_sender.blocking_send(c).is_err() {
                                         error!(

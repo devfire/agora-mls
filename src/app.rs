@@ -57,35 +57,42 @@ impl App {
 
         // Note the distinct lack of .await here - we want to spawn these tasks and let them run concurrently
         // rather than waiting for each to complete before starting the next.
-        let stdin_handle = processor.spawn_stdin_input_task(command_sender, message_sender.clone());
+        let mut stdin_handle =
+            processor.spawn_stdin_input_task(command_sender, message_sender.clone());
 
-        let command_handle = processor.spawn_command_handler_task(
+        let mut command_handle = processor.spawn_command_handler_task(
             crypto_identity_ref.clone(),
             command_receiver,
             display_sender.clone(),
         );
 
-        let message_handle = processor.ui_input_handler_task(
+        let mut message_handle = processor.ui_input_handler_task(
             crypto_identity_ref.clone(),
             message_receiver,
             display_sender.clone(),
         );
 
         // Start the UDP intake task to listen for incoming messages
-        let udp_intake_handle =
+        let mut udp_intake_handle =
             processor.spawn_udp_input_task(crypto_identity_ref.clone(), display_sender.clone());
 
         // Start the display task to show messages to the user
-        let display_handle = processor.spawn_message_display_task(display_receiver);
+        let mut display_handle = processor.spawn_message_display_task(display_receiver);
 
         // Wait for tasks to complete (they run indefinitely)
-        // The stdin_input_handle is the only one designed to finish, triggering a shutdown.
+        // The stdin_handle is the only one designed to finish, triggering a shutdown.
         tokio::select! {
-            _ = udp_intake_handle => debug!("UDP intake task completed unexpectedly."),
-            _ = display_handle => debug!("Display task completed unexpectedly."),
-            _ = command_handle => debug!("Command task completed unexpectedly."),
-            _ = message_handle => debug!("Message task completed unexpectedly."),
-            _ = stdin_handle => debug!("Stdin task complete. Shutting down."),
+            _ = &mut udp_intake_handle => debug!("UDP intake task completed unexpectedly."),
+            _ = &mut display_handle => debug!("Display task completed unexpectedly."),
+            _ = &mut command_handle => debug!("Command task completed unexpectedly."),
+            _ = &mut message_handle => debug!("Message task completed unexpectedly."),
+            _ = &mut stdin_handle => {
+                debug!("Stdin task complete. Shutting down.");
+                udp_intake_handle.abort();
+                display_handle.abort();
+                command_handle.abort();
+                message_handle.abort();
+            },
         }
 
         Ok(())
