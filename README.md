@@ -10,7 +10,9 @@ Agora MLS is a distributed chat application that leverages the MLS protocol to p
 
 ## Overview
 
-Agora MLS combines the security guarantees of the Messaging Layer Security (MLS) protocol with the simplicity of UDP multicast networking to create a serverless chat system. Each participant maintains their own identity and cryptographic state, enabling secure group conversations that resist eavesdropping and tampering.
+Agora MLS combines the security guarantees of the Messaging Layer Security (MLS) protocol with the simplicity of UDP multicast networking to create a serverless chat system. 
+
+Each participant maintains their own identity (loaded from a local SSH key) and cryptographic state, enabling secure group conversations.
 
 ### Why Agora MLS?
 
@@ -20,7 +22,7 @@ Agora MLS combines the security guarantees of the Messaging Layer Security (MLS)
 - **End-to-End Encryption** via the OpenMLS protocol (IETF RFC 9420)
 - **Decentralized Architecture** with no central server required
 - **Zero-Configuration Networking** using UDP multicast
-- **Actor-Based Concurrency** using [kameo](https://docs.page/tqwewe/kameo) for responsive, scalable performance
+- **Actor-Based Concurrency** using [kameo](https://docs.page/tqwewe/kameo) for scalable performance (and because actors are cool, duh)
 - **Identity Verification** through safety numbers (similar to Signal)
 
 ---
@@ -34,8 +36,8 @@ Agora MLS combines the security guarantees of the Messaging Layer Security (MLS)
 
 **Option 2: Building from Source**
 - Rust 2024 edition or later
-- An Ed25519 SSH key pair (this the only SSH type that will work!)
-- Protocol Buffers compiler (protoc) - installed automatically by cargo
+- An Ed25519 SSH key pair (NOTE: this the only SSH type that will work!)
+- Protocol Buffers compiler (protoc) - installed automatically by cargo, so you shouldn't have to worry about it.
 
 ### Installation
 
@@ -52,6 +54,7 @@ docker build -t agora-mls .
 # Run the application
 docker run --rm --network host agora-mls
 ```
+**Important**: Use `--network host` to enable UDP multicast communication on Linux. On macOS and Windows, Docker networking may require additional configuration for multicast support.
 
 #### From Source
 
@@ -114,186 +117,9 @@ Options:
   -V, --version                        Print version
 ```
 
-### Interactive Commands
-
-Once running, use these commands in the chat interface:
-
-- `/invite <nick> [password]` - Invite a user to join a channel
-- `/leave [channel]` - Leave current or specified channel
-- `/msg <user> <message>` - Send a private message
-- `/create <name>` - Create a new group
-- `/users` - List users in current channel
-- `/groups` - List available groups
-- `/group [name]` - Display or set active group
-- `/nick [nickname]` - Display or set your nickname
-- `/safety` - Generate safety number for identity verification
-- `/quit` or `/q` - Exit the application
-- Simply type a message and press Enter to send it to the group
-
----
-
-## Installation
-
-### Using Docker
-
-```bash
-# Clone and build
-git clone https://github.com/devfire/agora-mls
-cd agora-mls
-docker build -t agora-mls .
-
-# Run
-docker run --rm --network host agora-mls
-```
-
-See the [Docker Deployment](#docker-deployment) section for detailed usage.
-
-### From Source
-
-```bash
-git clone https://github.com/devfire/agora-mls
-cd agora-mls
-cargo build --release
-./target/release/agora-mls
-```
-
-### Docker Deployment
-
-Agora MLS can be deployed using Docker for consistent, isolated execution across different environments.
-
-#### Building the Docker Image
-
-```bash
-# Build the image
-docker build -t agora-mls .
-
-# Build with a specific tag
-docker build -t agora-mls:latest .
-```
-
-The Dockerfile uses a multi-stage build process:
-- **Build stage**: Compiles the Rust application with all dependencies
-- **Runtime stage**: Creates a minimal image (~100MB) with only the binary and runtime dependencies
-
-#### Running with Docker
-
-Basic usage:
-```bash
-# Display help
-docker run --rm agora-mls
-
-# Run with default settings
-docker run --rm --network host agora-mls
-```
-
-**Important**: Use `--network host` to enable UDP multicast communication on Linux. On macOS and Windows, Docker networking may require additional configuration for multicast support.
-
-Advanced usage with custom options:
-```bash
-# Run with custom chat ID and multicast address
-docker run --rm --network host agora-mls \
-  --chat-id my-secure-chat \
-  --multicast-address 239.1.2.3:9000
-
-# Run with persistent storage for SSH keys
-docker run --rm --network host \
-  -v ~/.ssh:/home/agora/.ssh:ro \
-  agora-mls --key-file /home/agora/.ssh/id_ed25519
-
-# Run interactively with mounted data directory
-docker run -it --rm --network host \
-  -v $(pwd)/data:/home/agora/.agora-mls \
-  agora-mls
-
-# Enable debug logging
-docker run --rm --network host agora-mls --log-level debug
-```
-
-#### Docker Networking Notes
-
-- **Linux**: Use `--network host` for UDP multicast to work properly
-- **macOS/Windows**: Docker Desktop may require additional network configuration for multicast
-- The default multicast address `239.255.255.250:8080` works on most local networks
-- Firewall rules may need adjustment to allow UDP multicast traffic
-
----
-
-## Architecture
-
-### Core Components
-
-```
-┌─────────────────────────────────────────────────┐
-│                    App                          │
-│  (Main coordinator and initialization)          │
-└────────────┬────────────────────────────────────┘
-             │
-    ┌────────┴────────┐
-    │                 │
-    ▼                 ▼
-┌─────────┐     ┌──────────┐
-│Identity │     │ Network  │
-│ Actor   │     │ Manager  │
-└────┬────┘     └────┬─────┘
-     │               │
-     ▼               ▼
-┌──────────┐   ┌───────────┐
-│OpenMLS   │   │Processor  │
-│Actor     │   │           │
-└────┬─────┘   └─────┬─────┘
-     │               │
-     └───────┬───────┘
-             ▼
-      ┌────────────┐
-      │   State    │
-      │   Actor    │
-      └────────────┘
-```
-
-### Actor System
-
-Agora MLS uses the **kameo** actor framework for concurrent message processing:
-
-- **IdentityActor**: Manages cryptographic identity and SSH key operations
-- **OpenMlsActor**: Handles MLS protocol state, encryption, and decryption operations
-- **StateActor**: Coordinates overall application state and group management
-- **Processor**: Routes messages between network, CLI, and state actors
-- **NetworkManager**: Handles UDP multicast communication
-
-### Security Model
-
-1. **Identity**: Each participant has an Ed25519 keypair
-2. **Key Packages**: MLS key packages are exchanged during group joins
-3. **Group State**: Encrypted group state synchronized via multicast
-4. **Safety Numbers**: Identity verification through numeric fingerprints
-
----
-
-## Documentation
-
-- [OpenMLS Documentation](https://docs.rs/openmls)
-- [Kameo Actor Framework](https://docs.rs/kameo)
-- [MLS Protocol (RFC 9420)](https://datatracker.ietf.org/doc/html/rfc9420)
-
-For detailed API documentation:
-
-```bash
-cargo doc --open
-```
-
 ---
 
 ## Configuration
-
-### Environment Variables
-
-```bash
-# Set default log level
-export RUST_LOG=agora_mls=debug
-
-# Configure tokio runtime
-export TOKIO_WORKER_THREADS=4
-```
 
 ### SSH Key Setup
 
@@ -311,95 +137,14 @@ agora-mls --key-file ~/.ssh/id_ed25519
 
 ---
 
-### Project Structure
-
-```
-agora-mls/
-├── src/
-│   ├── main.rs                   # Application entry point
-│   ├── lib.rs                    # Library exports and module definitions
-│   ├── app.rs                    # Main application coordinator
-│   ├── cli.rs                    # Command-line argument parsing
-│   ├── config.rs                 # Configuration management
-│   ├── command.rs                # Interactive command definitions
-│   ├── processor.rs              # Message processing and task coordination
-│   ├── network.rs                # UDP multicast networking
-│   ├── crypto_identity_actor.rs  # Cryptographic identity management
-│   ├── safety_number.rs          # Identity verification
-│   ├── error.rs                  # Error types
-│   ├── protobuf_wrapper.rs       # Protocol buffer message handling
-│   └── agora_chat.rs             # Generated protobuf code
-├── proto/
-│   └── chat.proto                # Protocol buffer definitions
-├── build.rs                      # Build script for protobuf compilation
-├── Dockerfile                    # Docker container definition
-├── .dockerignore                 # Docker build exclusions
-├── Cargo.toml                    # Dependencies and metadata
-└── Cargo.lock                    # Dependency version locks
-```
-
-### Running Tests
-
-HA, kidding: there are no tests yet.
-
----
-
-## Contributing
-
-Contributions are welcome! Please follow these guidelines:
-
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
-3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
-4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Pull Request
-
-### Code Style
-
-This project uses:
-- `rustfmt` for code formatting
-- `clippy` for linting
-
-```bash
-cargo fmt
-cargo clippy -- -D warnings
-```
-
-### Reporting Issues
-
-Please use GitHub Issues to report bugs or suggest features. Include:
-- Rust version (`rustc --version`)
-- Operating system
-- Steps to reproduce
-- Expected vs actual behavior
-
----
-
-## Performance Considerations
-
-- **Multicast Efficiency**: UDP multicast reduces bandwidth compared to unicast
-- **Actor Parallelism**: Concurrent message processing via tokio async runtime
-- **Zero-Copy**: Protocol buffers with minimal serialization overhead
-- **Buffer Sizing**: Configurable network buffer size (default 64KB)
-
-### Benchmarks
-
-Performance depends on:
-- Network latency and bandwidth
-- Number of group participants
-- Message frequency and size
-- CPU capabilities for cryptographic operations
-
----
-
 ## Security Considerations
 
 **Important Security Notes**:
 
-1. **Network Isolation**: Multicast traffic is visible to all devices on the local network segment
+1. **Network Isolation**: Multicast traffic is visible to all devices on the local network segment (but that's OK because everything is encrypted!)
 2. **Key Management**: Protect your private key file with appropriate filesystem permissions
 3. **Safety Numbers**: Always verify safety numbers when adding new participants
-4. **Development Status**: This is a prototype/research project - use with appropriate caution
+4. **Development Status**: This is a prototype/research project - use with appropriate caution (OBVIOUSLY)
 
 ### Threat Model
 
@@ -411,7 +156,6 @@ Performance depends on:
 
 **Not Protected Against**:
 - Network-level traffic analysis (although you can't really tell who is who, exactly!)
-- Replay attacks, that's WIP!
 - Local network attackers with physical access (can cause mischief but addressing malicious actors is WIP)
 
 ---
@@ -474,11 +218,11 @@ This project builds upon excellent work from the Rust community:
 
 ### Q: Why UDP multicast instead of a server?
 
-**A**: Multicast eliminates the need for server infrastructure, reducing complexity and central points of failure. It works well for local network communication and serves as a foundation for understanding decentralized protocols.
+**A**: Multicast eliminates the need for server infrastructure, reducing complexity and central points of failure. It works well for local network communication and serves as a foundation for understanding decentralized protocols. This is like.. ZEROCONF and everything. :)
 
 ### Q: Can I use this over the internet?
 
-**A**: UDP multicast is typically limited to local networks. For internet usage, you'd need to implement NAT traversal or use a relay server (defeating the serverless design).
+**A**: UDP multicast is typically limited to local networks. For internet usage, you'd need to implement NAT traversal or use a relay server (defeating the serverless design). So.. no?
 
 ### Q: Is this production-ready?
 
