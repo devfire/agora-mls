@@ -8,6 +8,7 @@ pub mod network;
 pub mod processor;
 pub mod protobuf_wrapper;
 pub mod safety_number;
+pub mod tui;
 
 // Re-export commonly used items for easier access
 pub use crate::cli::ChatArgs;
