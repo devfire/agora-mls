@@ -20,18 +20,6 @@ pub struct Processor {
     pub network_manager: Arc<network::NetworkManager>,
     pub nick: String,
 
-    // we can't access self directly inside the spawn_stdin_input_task blocking closure.
-    // Why not?
-    // The Technical Reason
-    // When you use tokio::task::spawn_blocking(move || { ... }), you're creating a closure that:
-    //
-    // Must be 'static - The closure needs to potentially outlive the current scope because it's being moved to a separate blocking thread pool that Tokio manages
-    // Takes ownership - The move keyword means the closure takes ownership of any variables it captures
-    // The problem is that self in the method signature is a reference (&self), not owned data.
-    // In Rust:
-    // You can't move a borrowed reference into a 'static closure
-    // The lifetime of &self is tied to the Processor instance, but the spawned thread might outlive that instance
-    // Rust's borrow checker prevents this to ensure memory safety
     pub current_group: Arc<Mutex<Option<String>>>,
 }
 
@@ -50,6 +38,7 @@ impl Processor {
     }
 
     /// Spawn a task to handle messages from stdin and forward them to the network manager.
+    /// Acts as the bridge between the UI input and the actual application logic (encryption & network).
     pub fn ui_input_handler_task(
         &self,
         crypto_actor: ActorRef<CryptoIdentityActor>,

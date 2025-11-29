@@ -57,6 +57,8 @@ impl Tui {
 
         let mut messages: Vec<String> = Vec::new();
         let mut auto_scroll = true;
+        let mut input_history: Vec<String> = Vec::new();
+        let mut history_index = 0;
 
         loop {
             // Determine the current prompt based on group
@@ -150,6 +152,26 @@ impl Tui {
             if event::poll(Duration::from_millis(10))? {
                 match event::read()? {
                     Event::Key(key) => match key.code {
+                        KeyCode::Up => {
+                            if !input_history.is_empty() {
+                                if history_index > 0 {
+                                    history_index -= 1;
+                                    textarea.delete_line_by_head();
+                                    textarea.insert_str(&input_history[history_index]);
+                                }
+                            }
+                        }
+                        KeyCode::Down => {
+                            if !input_history.is_empty() {
+                                if history_index < input_history.len() {
+                                    history_index += 1;
+                                    textarea.delete_line_by_head();
+                                    if history_index < input_history.len() {
+                                        textarea.insert_str(&input_history[history_index]);
+                                    }
+                                }
+                            }
+                        }
                         KeyCode::Tab | KeyCode::Right => {
                             // Accept suggestion if available (Right arrow or Tab)
                             // Note: Tab also does autocomplete logic which is slightly different (finds match vs uses pre-calc suggestion)
@@ -172,6 +194,12 @@ impl Tui {
                             let input = textarea.lines()[0].clone();
                             if !input.is_empty() {
                                 textarea.delete_line_by_head();
+
+                                // Add to history
+                                if input_history.last() != Some(&input) {
+                                    input_history.push(input.clone());
+                                }
+                                history_index = input_history.len();
 
                                 if input.starts_with('/') {
                                     match Command::parse_command(&input) {
