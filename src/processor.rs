@@ -383,8 +383,13 @@ impl Processor {
                 {
                     let mut group = current_group.lock();
                     *group = Some(group_name.clone());
-                    println!("\x1b[32m✓ Switched to group: {}\x1b[0m", group_name);
                 }
+                display_sender
+                    .send(format!(
+                        "\x1b[32m✓ Switched to group: {}\x1b[0m",
+                        group_name
+                    ))
+                    .await?;
                 Ok(())
             }
             CryptoIdentityReply::EncryptedGroupInfoForExternalInvite {
