@@ -143,7 +143,7 @@ impl Tui {
                         let ghost_text = Paragraph::new(sugg.clone())
                             .style(Style::default().fg(Color::DarkGray));
 
-                        // Time to render the ghost text! 
+                        // Time to render the ghost text!
                         // We want this to appear right after the user's cursor, acting as a subtle suggestion.
                         // We calculate the exact rectangle where this text should live, starting from ghost_x/ghost_y.
                         // It fills the rest of the input line.
@@ -240,11 +240,15 @@ impl Tui {
                                                     return Ok(());
                                                 }
                                             }
-                                            Err(_) => {
-                                                messages.push(
-                                                    "Invalid command. Type /help for help."
-                                                        .to_string(),
-                                                );
+                                            Err(e) => {
+                                                if e.kind() == clap::error::ErrorKind::DisplayHelp {
+                                                    messages.push(Command::get_help_string());
+                                                } else {
+                                                    messages.push(
+                                                        "Invalid command. Type /help for help."
+                                                            .to_string(),
+                                                    );
+                                                }
                                             }
                                         }
                                     } else {
