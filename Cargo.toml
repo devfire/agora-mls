@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 clap = { version = "4.5.51", features = ["derive"] }
+crossterm = "0.29.0"
 ed25519 = { version = "2.2.3", features = ["pkcs8"] }
 ed25519-dalek = { version = "2.2.0", features = ["signature"] }
 hex = "0.4.3"
@@ -18,6 +19,7 @@ pem = "3.0.6"
 pkcs8 = "0.10.2"
 prost = "0.14.1"
 qrcode = "0.14.1"
+ratatui = "0.29.0"
 rcgen = "0.14.5"
 rpassword = "7.4.0"
 rustyline = "17.0.2"
@@ -32,6 +34,8 @@ thiserror = "2.0.17"
 tokio = { version = "1.48.0", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+tui-textarea = "0.7.0"
+unicode-width = "0.2.0"
 uuid = { version = "1.18.1", features = ["v4"] }
 x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
 zeroize = "1.8.2"

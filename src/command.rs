@@ -105,26 +105,28 @@ impl Command {
         CommandWrapper::try_parse_from(args).map(|wrapper| wrapper.command)
     }
 
-    pub fn show_custom_help() {
-        println!("╭─ Chat Commands ─────────────────────────────────────────╮");
-        println!("│                                                         │");
-        println!("│  /invite <nick> <group>         Invite user to group    │");
-        println!("│  /leave <channel>               Leave channel           │");
-        println!("│  /msg <user> <message>          Send private message    │");
-        println!("│  /create-group <name>           Create a new group      │");
-        println!("│  /users                         List known users        │");
-        println!("│  /groups                        List available groups   │");
-        println!("│  /group <name>                  Switch to a group       │");
-        println!("│  /safety                        Show safety number      │");
-        println!("│  /announce                      Send MLS key package    │");
-        println!("│  /quit, /q                      Exit the chat           │");
-        println!("│                                                         │");
-        println!("│  Examples:                                              │");
-        println!("│    /msg alice Hey there!                                │");
-        println!("│    /invite bob engineering                              │");
-        println!("│    /create-group team-chat                              │");
-        println!("│                                                         │");
-        println!("╰─────────────────────────────────────────────────────────╯");
+    pub fn get_help_string() -> String {
+        let mut help = String::new();
+        help.push_str("╭─ Chat Commands ─────────────────────────────────────────╮\n");
+        help.push_str("│                                                         │\n");
+        help.push_str("│  /invite <nick> <group>         Invite user to group    │\n");
+        help.push_str("│  /leave <channel>               Leave channel           │\n");
+        help.push_str("│  /msg <user> <message>          Send private message    │\n");
+        help.push_str("│  /create-group <name>           Create a new group      │\n");
+        help.push_str("│  /users                         List known users        │\n");
+        help.push_str("│  /groups                        List available groups   │\n");
+        help.push_str("│  /group <name>                  Switch to a group       │\n");
+        help.push_str("│  /safety                        Show safety number      │\n");
+        help.push_str("│  /announce                      Send MLS key package    │\n");
+        help.push_str("│  /quit, /q                      Exit the chat           │\n");
+        help.push_str("│                                                         │\n");
+        help.push_str("│  Examples:                                              │\n");
+        help.push_str("│    /msg alice Hey there!                                │\n");
+        help.push_str("│    /invite bob engineering                              │\n");
+        help.push_str("│    /create-group team-chat                              │\n");
+        help.push_str("│                                                         │\n");
+        help.push_str("╰─────────────────────────────────────────────────────────╯");
+        help
     }
 }
 
