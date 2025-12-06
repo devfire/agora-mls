@@ -1,7 +1,7 @@
 use agora_mls::{app::App, cli::ChatArgs, config::Config};
 
 use clap::Parser;
-use tracing::{Level, error, info};
+use tracing::{Level, info};
 use tracing_subscriber;
 
 #[tokio::main]
@@ -25,10 +25,8 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     // Validate arguments
-    if let Err(e) = args.validate() {
-        error!("Error: {}", e);
-        std::process::exit(1);
-    }
+    // Expect is OK here because if the args are invalid, we gon bail anyway.
+    args.validate().expect("Invalid arguments, exiting.");
 
     info!("Starting chat with options: {}", args);
 
